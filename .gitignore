@@ -19,6 +19,9 @@ target/
 *.iml
 *.iws
 
+# claude ignore
+.claude/
+
 # visual-studio-code ignore
 .vscode/
 
