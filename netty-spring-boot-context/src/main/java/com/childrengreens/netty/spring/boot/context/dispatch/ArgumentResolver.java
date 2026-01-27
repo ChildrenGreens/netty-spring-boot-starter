@@ -1,0 +1,52 @@
+/*
+ * Copyright 2024-2025 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.childrengreens.netty.spring.boot.context.dispatch;
+
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
+
+import java.lang.reflect.Parameter;
+import java.util.Map;
+
+/**
+ * Strategy interface for resolving method arguments from message context.
+ *
+ * @author Netty Spring Boot
+ * @since 1.0.0
+ * @see ArgumentResolverComposite
+ */
+public interface ArgumentResolver {
+
+    /**
+     * Return whether this resolver supports the given parameter.
+     * @param parameter the method parameter
+     * @return {@code true} if this resolver supports the parameter
+     */
+    boolean supports(Parameter parameter);
+
+    /**
+     * Resolve the argument value.
+     * @param parameter the method parameter
+     * @param message the inbound message
+     * @param context the Netty context
+     * @param pathVariables the extracted path variables
+     * @return the resolved argument value
+     */
+    Object resolve(Parameter parameter, InboundMessage message,
+                   NettyContext context, Map<String, String> pathVariables);
+
+}
