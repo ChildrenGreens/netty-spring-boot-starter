@@ -20,7 +20,7 @@ package com.childrengreens.netty.spring.boot.context.server;
  * Enumeration of server states.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public enum ServerState {
 

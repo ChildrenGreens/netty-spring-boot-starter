@@ -23,7 +23,7 @@ import java.util.Map;
  * Abstract representation of an outbound message for protocol-agnostic response handling.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see InboundMessage
  */
 public class OutboundMessage {

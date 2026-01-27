@@ -32,7 +32,7 @@ import io.netty.handler.codec.http.HttpServerCodec;
  * </ul>
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class Http1JsonProfile implements Profile {
 

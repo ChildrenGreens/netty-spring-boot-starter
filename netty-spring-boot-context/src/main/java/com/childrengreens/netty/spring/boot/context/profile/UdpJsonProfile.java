@@ -26,7 +26,7 @@ import io.netty.channel.ChannelPipeline;
  * with JSON serialization.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class UdpJsonProfile implements Profile {
 

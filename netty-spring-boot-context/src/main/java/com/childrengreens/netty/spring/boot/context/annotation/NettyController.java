@@ -37,7 +37,7 @@ import java.lang.annotation.Target;
  * or WebSocket-related annotations.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyHttpGet
  * @see NettyHttpPost
  * @see NettyWsOnOpen

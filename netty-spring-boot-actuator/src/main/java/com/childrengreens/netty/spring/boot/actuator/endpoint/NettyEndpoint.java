@@ -33,7 +33,7 @@ import java.util.Map;
  * {@code /actuator/netty}.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 @Endpoint(id = "netty")
 public class NettyEndpoint {

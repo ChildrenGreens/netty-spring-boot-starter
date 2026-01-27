@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * functionality for profile configuration during server startup.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see Profile
  */
 public class ProfileRegistry {

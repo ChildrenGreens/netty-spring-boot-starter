@@ -29,7 +29,7 @@ import java.lang.annotation.Target;
  * is received on the WebSocket connection.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyController
  * @see NettyWsOnOpen
  * @see NettyWsOnBinary

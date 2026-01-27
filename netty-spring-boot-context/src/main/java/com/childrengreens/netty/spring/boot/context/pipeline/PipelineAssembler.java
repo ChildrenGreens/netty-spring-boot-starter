@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.pipeline;
 
+import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
@@ -50,7 +51,7 @@ import java.util.List;
  * </ol>
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see Profile
  * @see FeatureProvider
  * @see NettyPipelineConfigurer
@@ -62,6 +63,7 @@ public class PipelineAssembler {
     private final ProfileRegistry profileRegistry;
     private final FeatureRegistry featureRegistry;
     private final Dispatcher dispatcher;
+    private final CodecRegistry codecRegistry;
     private final List<NettyPipelineConfigurer> configurers;
 
     /**
@@ -69,13 +71,16 @@ public class PipelineAssembler {
      * @param profileRegistry the profile registry
      * @param featureRegistry the feature registry
      * @param dispatcher the message dispatcher
+     * @param codecRegistry the codec registry
      * @param configurers the custom pipeline configurers
      */
     public PipelineAssembler(ProfileRegistry profileRegistry, FeatureRegistry featureRegistry,
-                              Dispatcher dispatcher, List<NettyPipelineConfigurer> configurers) {
+                              Dispatcher dispatcher, CodecRegistry codecRegistry,
+                              List<NettyPipelineConfigurer> configurers) {
         this.profileRegistry = profileRegistry;
         this.featureRegistry = featureRegistry;
         this.dispatcher = dispatcher;
+        this.codecRegistry = codecRegistry;
         this.configurers = new ArrayList<>(configurers);
         this.configurers.sort(Comparator.comparingInt(NettyPipelineConfigurer::getOrder));
     }
@@ -103,7 +108,8 @@ public class PipelineAssembler {
 
         // 4. Add dispatcher handler if profile supports it
         if (profile.supportsDispatcher()) {
-            pipeline.addLast("dispatcherHandler", new DispatcherHandler(dispatcher, serverSpec));
+            pipeline.addLast("dispatcherHandler",
+                    new DispatcherHandler(dispatcher, serverSpec, codecRegistry));
         }
 
         // 5. Add exception handler

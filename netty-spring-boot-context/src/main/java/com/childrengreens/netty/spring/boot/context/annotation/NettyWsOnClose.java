@@ -29,7 +29,7 @@ import java.lang.annotation.Target;
  * connection is closed.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyController
  * @see NettyWsOnOpen
  */

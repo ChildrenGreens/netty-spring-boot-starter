@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Registry for managing codec implementations.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyCodec
  */
 public class CodecRegistry {

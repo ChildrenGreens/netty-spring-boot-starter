@@ -28,7 +28,7 @@ import java.util.Map;
  * across different protocols (TCP, UDP, HTTP, WebSocket).
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see OutboundMessage
  */
 public class InboundMessage {

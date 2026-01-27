@@ -27,7 +27,7 @@ import io.netty.channel.ChannelPipeline;
  * logging, rate limiting, and connection limiting.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see FeatureRegistry
  */
 public interface FeatureProvider {

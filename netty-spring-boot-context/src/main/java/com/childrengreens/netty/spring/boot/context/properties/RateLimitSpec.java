@@ -20,7 +20,7 @@ package com.childrengreens.netty.spring.boot.context.properties;
  * Rate limiting configuration.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class RateLimitSpec {
 
@@ -33,6 +33,12 @@ public class RateLimitSpec {
      * Maximum requests per second per IP.
      */
     private int requestsPerSecond = 100;
+
+    /**
+     * Burst size for token bucket algorithm.
+     * Allows short bursts above the rate limit.
+     */
+    private int burstSize = 0;
 
     /**
      * Return whether rate limiting is enabled.
@@ -64,6 +70,22 @@ public class RateLimitSpec {
      */
     public void setRequestsPerSecond(int requestsPerSecond) {
         this.requestsPerSecond = requestsPerSecond;
+    }
+
+    /**
+     * Return the burst size.
+     * @return the burst size
+     */
+    public int getBurstSize() {
+        return this.burstSize;
+    }
+
+    /**
+     * Set the burst size.
+     * @param burstSize the burst size
+     */
+    public void setBurstSize(int burstSize) {
+        this.burstSize = burstSize;
     }
 
 }

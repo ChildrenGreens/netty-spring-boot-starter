@@ -29,7 +29,7 @@ import java.lang.annotation.Target;
  * with a method parameter annotated with {@code @PathVar("id")}.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyHttpGet
  * @see NettyHttpPost
  */

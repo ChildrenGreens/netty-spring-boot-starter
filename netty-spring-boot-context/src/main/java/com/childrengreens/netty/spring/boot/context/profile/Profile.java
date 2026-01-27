@@ -27,7 +27,7 @@ import io.netty.channel.ChannelPipeline;
  * including frame decoders, codecs, and business handlers.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see ProfileRegistry
  */
 public interface Profile {

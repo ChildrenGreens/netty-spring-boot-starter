@@ -28,7 +28,7 @@ import java.lang.annotation.Target;
  * <p>The body will be decoded using the configured codec (JSON by default).
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyHttpPost
  */
 @Target(ElementType.PARAMETER)

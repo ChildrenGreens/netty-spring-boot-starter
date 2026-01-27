@@ -23,7 +23,7 @@ package com.childrengreens.netty.spring.boot.context.codec;
  * for various formats such as JSON, Protobuf, or custom binary protocols.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see JsonNettyCodec
  * @see CodecRegistry
  */

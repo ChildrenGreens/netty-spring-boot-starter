@@ -23,10 +23,12 @@ import com.childrengreens.netty.spring.boot.context.dispatch.ArgumentResolver;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.dispatch.PathVariableArgumentResolver;
 import com.childrengreens.netty.spring.boot.context.dispatch.QueryArgumentResolver;
+import com.childrengreens.netty.spring.boot.context.feature.ConnectionLimitFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
 import com.childrengreens.netty.spring.boot.context.feature.IdleFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.LoggingFeatureProvider;
+import com.childrengreens.netty.spring.boot.context.feature.RateLimitFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.SslFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.pipeline.NettyPipelineConfigurer;
 import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
@@ -64,7 +66,7 @@ import java.util.List;
  * </ul>
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 @AutoConfiguration
 @ConditionalOnClass(io.netty.channel.Channel.class)
@@ -110,6 +112,8 @@ public class NettyAutoConfiguration {
         registry.register(new SslFeatureProvider());
         registry.register(new LoggingFeatureProvider());
         registry.register(new IdleFeatureProvider());
+        registry.register(new RateLimitFeatureProvider());
+        registry.register(new ConnectionLimitFeatureProvider());
 
         // Register custom features
         features.forEach(registry::register);
@@ -194,6 +198,7 @@ public class NettyAutoConfiguration {
      * @param profileRegistry the profile registry
      * @param featureRegistry the feature registry
      * @param dispatcher the dispatcher
+     * @param codecRegistry the codec registry
      * @param configurers custom pipeline configurers
      * @return the pipeline assembler
      */
@@ -202,10 +207,12 @@ public class NettyAutoConfiguration {
     public PipelineAssembler pipelineAssembler(ProfileRegistry profileRegistry,
                                                 FeatureRegistry featureRegistry,
                                                 Dispatcher dispatcher,
+                                                CodecRegistry codecRegistry,
                                                 ObjectProvider<NettyPipelineConfigurer> configurers) {
         List<NettyPipelineConfigurer> configurerList = new ArrayList<>();
         configurers.forEach(configurerList::add);
-        return new PipelineAssembler(profileRegistry, featureRegistry, dispatcher, configurerList);
+        return new PipelineAssembler(profileRegistry, featureRegistry, dispatcher,
+                codecRegistry, configurerList);
     }
 
     /**

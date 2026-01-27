@@ -26,7 +26,7 @@ import java.util.Map;
  * Strategy interface for resolving method arguments from message context.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see ArgumentResolverComposite
  */
 public interface ArgumentResolver {

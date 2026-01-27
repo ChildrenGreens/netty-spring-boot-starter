@@ -20,7 +20,7 @@ package com.childrengreens.netty.spring.boot.context.properties;
  * Graceful shutdown configuration for Netty servers.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class ShutdownSpec {
 

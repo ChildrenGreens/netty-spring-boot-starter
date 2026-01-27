@@ -26,7 +26,7 @@ import io.netty.channel.ChannelPipeline;
  * pipeline during server initialization.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 @FunctionalInterface
 public interface NettyPipelineConfigurer {

@@ -36,7 +36,7 @@ import java.lang.annotation.Target;
  * annotated handler methods.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyMessageMapping
  */
 @Target(ElementType.TYPE)

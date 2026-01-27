@@ -16,6 +16,8 @@
 
 package com.childrengreens.netty.spring.boot.context.handler;
 
+import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
+import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
@@ -42,7 +44,7 @@ import java.util.Map;
  * and delegates to the {@link Dispatcher} for routing and invocation.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
 
@@ -50,15 +52,18 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
 
     private final Dispatcher dispatcher;
     private final ServerSpec serverSpec;
+    private final CodecRegistry codecRegistry;
 
     /**
      * Create a new DispatcherHandler.
      * @param dispatcher the message dispatcher
      * @param serverSpec the server specification
+     * @param codecRegistry the codec registry for encoding responses
      */
-    public DispatcherHandler(Dispatcher dispatcher, ServerSpec serverSpec) {
+    public DispatcherHandler(Dispatcher dispatcher, ServerSpec serverSpec, CodecRegistry codecRegistry) {
         this.dispatcher = dispatcher;
         this.serverSpec = serverSpec;
+        this.codecRegistry = codecRegistry;
     }
 
     @Override
@@ -269,13 +274,21 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     }
 
     /**
-     * Serialize object to JSON bytes (simplified implementation).
+     * Serialize object to JSON bytes using the codec registry.
      */
     private byte[] serializeToJson(Object obj) {
         if (obj == null) {
             return "null".getBytes(StandardCharsets.UTF_8);
         }
-        // This is a simplified implementation - actual implementation would use JsonNettyCodec
+        NettyCodec codec = codecRegistry.getDefaultCodec();
+        if (codec != null) {
+            try {
+                return codec.encode(obj);
+            } catch (Exception e) {
+                logger.error("Failed to serialize object using codec", e);
+            }
+        }
+        // Fallback to toString if no codec available
         return obj.toString().getBytes(StandardCharsets.UTF_8);
     }
 

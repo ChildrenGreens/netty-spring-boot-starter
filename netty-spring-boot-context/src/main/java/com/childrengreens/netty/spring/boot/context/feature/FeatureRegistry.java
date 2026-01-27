@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * ordered access for pipeline configuration.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see FeatureProvider
  */
 public class FeatureRegistry {

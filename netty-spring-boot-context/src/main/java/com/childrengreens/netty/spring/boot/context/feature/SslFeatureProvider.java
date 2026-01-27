@@ -35,7 +35,7 @@ import java.security.cert.CertificateException;
  * <p>Adds SSL handler to the pipeline for secure communication.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class SslFeatureProvider implements FeatureProvider {
 

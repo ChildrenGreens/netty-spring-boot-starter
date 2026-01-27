@@ -26,7 +26,7 @@ import java.lang.annotation.Target;
  * Annotation that binds a method parameter to a query parameter.
  *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  * @see NettyHttpGet
  */
 @Target(ElementType.PARAMETER)

@@ -36,8 +36,17 @@ import java.lang.reflect.Parameter;
  * {@link NettyMessageController} and registers their handler methods with
  * the {@link Router}.
  *
+ * <p>Supported HTTP method annotations:
+ * <ul>
+ * <li>{@link NettyHttpGet} - GET requests</li>
+ * <li>{@link NettyHttpPost} - POST requests</li>
+ * <li>{@link NettyHttpPut} - PUT requests</li>
+ * <li>{@link NettyHttpDelete} - DELETE requests</li>
+ * <li>{@link NettyHttpMapping} - Generic HTTP mapping</li>
+ * </ul>
+ *
  * @author Netty Spring Boot
- * @since 1.0.0
+ * @since 0.0.1
  */
 public class AnnotationRegistry implements BeanPostProcessor {
 
@@ -127,9 +136,24 @@ public class AnnotationRegistry implements BeanPostProcessor {
             registerHttpRoutes(bean, method, basePath, paths, "POST");
         }
 
+        // Check for @NettyHttpPut
+        NettyHttpPut httpPut = AnnotationUtils.findAnnotation(method, NettyHttpPut.class);
+        if (httpPut != null) {
+            String[] paths = httpPut.value().length > 0 ? httpPut.value() : httpPut.path();
+            registerHttpRoutes(bean, method, basePath, paths, "PUT");
+        }
+
+        // Check for @NettyHttpDelete
+        NettyHttpDelete httpDelete = AnnotationUtils.findAnnotation(method, NettyHttpDelete.class);
+        if (httpDelete != null) {
+            String[] paths = httpDelete.value().length > 0 ? httpDelete.value() : httpDelete.path();
+            registerHttpRoutes(bean, method, basePath, paths, "DELETE");
+        }
+
         // Check for generic @NettyHttpMapping
         NettyHttpMapping httpMapping = AnnotatedElementUtils.findMergedAnnotation(method, NettyHttpMapping.class);
-        if (httpMapping != null && httpGet == null && httpPost == null) {
+        if (httpMapping != null && httpGet == null && httpPost == null
+                && httpPut == null && httpDelete == null) {
             String[] paths = httpMapping.value().length > 0 ? httpMapping.value() : httpMapping.path();
             String[] methods = httpMapping.method();
             for (String httpMethod : methods) {
