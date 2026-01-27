@@ -57,9 +57,4 @@ public class WebSocketProfile implements Profile {
         pipeline.addLast("httpAggregator", new HttpObjectAggregator(MAX_CONTENT_LENGTH));
     }
 
-    @Override
-    public String getDefaultCodec() {
-        return "json";
-    }
-
 }

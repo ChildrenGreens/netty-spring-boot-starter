@@ -171,7 +171,6 @@ public class Dispatcher {
     /**
      * Handle the return value from the handler method.
      */
-    @SuppressWarnings("unchecked")
     private CompletableFuture<OutboundMessage> handleReturnValue(Object returnValue) {
         if (returnValue == null) {
             return CompletableFuture.completedFuture(null);

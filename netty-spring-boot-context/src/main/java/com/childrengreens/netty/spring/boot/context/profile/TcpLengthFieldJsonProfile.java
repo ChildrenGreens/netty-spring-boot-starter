@@ -67,9 +67,4 @@ public class TcpLengthFieldJsonProfile implements Profile {
         pipeline.addLast("frameEncoder", new LengthFieldPrepender(LENGTH_FIELD_LENGTH));
     }
 
-    @Override
-    public String getDefaultCodec() {
-        return "json";
-    }
-
 }

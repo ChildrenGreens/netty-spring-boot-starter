@@ -46,9 +46,4 @@ public class UdpJsonProfile implements Profile {
         // JSON codec will be added by the pipeline assembler
     }
 
-    @Override
-    public String getDefaultCodec() {
-        return "json";
-    }
-
 }

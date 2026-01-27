@@ -24,6 +24,7 @@ import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.lang.NonNull;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
@@ -53,7 +54,7 @@ public class AnnotationRegistry implements BeanPostProcessor {
     }
 
     @Override
-    public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+    public Object postProcessAfterInitialization(@NonNull Object bean, @NonNull String beanName) throws BeansException {
         Class<?> targetClass = AopUtils.getTargetClass(bean);
 
         // Check for NettyController
