@@ -14,64 +14,57 @@
 - **一套配置启动多协议服务** - 通过 YAML 配置同时启动 TCP/HTTP/WebSocket/UDP 服务
 - **注解式路由** - 像 Spring MVC / Spring Messaging 一样开发处理器
 - **Profile 协议栈模板** - 一键启用协议栈，Feature 配置化叠加能力
+- **客户端支持** - 声明式客户端接口，支持连接池、自动重连、心跳保活
 - **生产就绪** - 内置可观测性（metrics/health），支持优雅关闭
 - **高度可扩展** - 高级用户可通过 Configurer/Codec/RouteResolver 扩展
 
 ## 架构设计
 
-核心设计理念：**统一运行模型（ServerSpec）+ Profile（协议栈模板）+ Feature（能力组件）+ 注解路由（Handler Registry）+ Dispatcher（协议无关分发）**
-
-用户只需编写 YAML 配置和注解，无需直接接触 Bootstrap/ChannelInitializer/EventLoopGroup/Pipeline 细节。
-
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        用户侧：配置 + 注解                                 │
-│  ┌─────────────────────────┐    ┌─────────────────────────────────────┐ │
-│  │    application.yml      │    │  @NettyHttpGet / @NettyWsOnText     │ │
-│  │    netty.servers[*]     │    │  @NettyMessageMapping ...           │ │
-│  └─────────────────────────┘    └─────────────────────────────────────┘ │
+│                           application.yml                               │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
+│  │    netty.servers[*]         │    │    netty.clients[*]             │ │
+│  │    服务端配置                 │    │    客户端配置                    │ │
+│  └─────────────────────────────┘    └─────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+                    │                              │
+                    ▼                              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      Netty Spring Boot Starter                          │
-│  ┌────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐   │
-│  │ NettyProperties│→ │ 自动配置         │→ │ ServerOrchestrator      │   │
-│  │ ServerSpec     │  └─────────────────┘  │ (多服务器管理)            │   │
-│  └────────────────┘                       └─────────────────────────┘   │
-│          │                                          │                   │
-│          ▼                                          ▼                   │
-│  ┌────────────────┐  ┌─────────────────┐   ┌─────────────────────────┐  │
-│  │TransportFactory│  │ PipelineAssembler│  │    ServerRuntime[*]     │  │
-│  │ TCP/UDP/HTTP   │  │ Profile+Features │  └─────────────────────────┘  │
-│  └────────────────┘  └─────────────────┘                                │
-│          │                    │                                         │
-│          ▼                    ▼                                         │
-│  ┌────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐   │
-│  │ ProfileRegistry│  │ FeatureRegistry │  │   AnnotationRegistry    │   │
-│  │ (内置+可扩展)    │  │ ssl/idle/codec..│  │   (扫描注解)             │   │
-│  └────────────────┘  └─────────────────┘  └─────────────────────────┘   │
-│                              │                        │                 │
-│                              ▼                        ▼                 │
-│                      ┌─────────────────┐  ┌─────────────────────────┐   │
-│                      │     Router      │→ │      Dispatcher         │   │
-│                      │PATH/MESSAGE_TYPE│  │ 参数绑定/方法调用          │   │
-│                      └─────────────────┘  └─────────────────────────┘   │
-│                              │                        │                 │
-│                              ▼                        ▼                 │
-│                      ┌─────────────────┐  ┌─────────────────────────┐   │
-│                      │     Codec       │  │    Observability        │   │
-│                      │ JSON/Protobuf   │  │ Metrics+Health+Tracing  │   │
-│                      └─────────────────┘  └─────────────────────────┘   │
+│                      netty-spring-boot-context                          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                         共享组件                                   │  │
+│  │  Codec │ Profile │ InboundMessage │ OutboundMessage │ NettyContext │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌────────────────────────┐        ┌────────────────────────────────┐  │
+│  │      服务端组件          │        │         客户端组件              │  │
+│  │  ┌──────────────────┐  │        │  ┌────────────────────────┐   │  │
+│  │  │ ServerOrchestrator│  │        │  │ ClientOrchestrator     │   │  │
+│  │  │ DispatcherHandler │  │        │  │ ConnectionPool         │   │  │
+│  │  │ Router            │  │        │  │ ReconnectManager       │   │  │
+│  │  │ Dispatcher        │  │        │  │ HeartbeatManager       │   │  │
+│  │  │ @NettyController  │  │        │  │ RequestInvoker         │   │  │
+│  │  └──────────────────┘  │        │  │ @NettyClient           │   │  │
+│  └────────────────────────┘        │  └────────────────────────┘   │  │
+│                                     └────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+                    │                              │
+                    ▼                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     netty-spring-boot-actuator                          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  Metrics │ Health Check │ Endpoint │ Connection Stats │ Tracing   │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           Netty 运行时                                   │
-│  ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────┐   │
-│  │  BossGroup  │ →  │ WorkerGroup │ →  │  ChannelPipeline           │   │
-│  └─────────────┘    └─────────────┘    │  (阶段化 Handlers)          │   │
-│                                        └────────────────────────────┘   │
+│  ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────┐  │
+│  │  BossGroup  │ →  │ WorkerGroup │ →  │  ChannelPipeline           │  │
+│  └─────────────┘    └─────────────┘    │  (阶段化 Handlers)          │  │
+│                                         └────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,9 +72,9 @@
 
 ```
 netty-spring-boot/
-├── netty-spring-boot-context/        # 核心 API、注解、接口
+├── netty-spring-boot-context/        # 核心 API、注解、接口（服务端 + 客户端）
 ├── netty-spring-boot-actuator/       # 监控指标、健康检查、端点
-├── netty-spring-boot-autoconfigure/  # 自动配置
+├── netty-spring-boot-autoconfigure/  # 自动配置（服务端 + 客户端）
 ├── netty-spring-boot-starter/        # Starter 依赖聚合
 └── samples/                          # 示例应用
     └── sample-tcp-json/
@@ -243,6 +236,102 @@ public class WebSocketHandler {
 }
 ```
 
+## 客户端使用
+
+### 1. 配置客户端
+
+```yaml
+netty:
+  clients:
+    - name: order-service
+      host: 127.0.0.1
+      port: 9000
+      profile: tcp-lengthfield-json
+      pool:
+        maxConnections: 10
+        minIdle: 2
+        maxIdleMs: 60000
+        acquireTimeoutMs: 5000
+      reconnect:
+        enabled: true
+        initialDelayMs: 1000
+        maxDelayMs: 30000
+        multiplier: 2.0
+        maxRetries: -1             # -1 = 无限重试
+      heartbeat:
+        enabled: true
+        intervalMs: 30000
+        timeoutMs: 5000
+        message: '{"type":"heartbeat"}'
+      timeout:
+        connectMs: 5000
+        requestMs: 10000
+```
+
+### 2. 定义客户端接口
+
+```java
+@NettyClient(name = "order-service")
+public interface OrderClient {
+
+    @NettyRequest(type = "ping")
+    PongResponse ping();
+
+    @NettyRequest(type = "order", timeout = 5000)
+    CompletableFuture<OrderResponse> createOrder(OrderRequest request);
+}
+```
+
+### 3. 启用客户端扫描
+
+```java
+@SpringBootApplication
+@EnableNettyClients(basePackages = "com.example.clients")
+public class MyApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MyApplication.class, args);
+    }
+}
+```
+
+### 4. 使用客户端
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderClient orderClient;  // 自动注入代理
+
+    public void process() {
+        PongResponse pong = orderClient.ping();
+
+        orderClient.createOrder(request)
+            .thenAccept(response -> log.info("订单已创建: {}", response));
+    }
+}
+```
+
+## 服务端注解
+
+| 注解 | 描述 |
+|------|------|
+| `@NettyController` | HTTP/WebSocket 控制器 |
+| `@NettyMessageController` | TCP/UDP 消息控制器 |
+| `@NettyMessageMapping` | 消息类型映射 |
+| `@NettyHttpGet/Post/Put/Delete` | HTTP 方法映射 |
+| `@NettyWsOnOpen/Text/Binary/Close` | WebSocket 事件映射 |
+| `@PathVar` / `@Query` / `@Body` / `@Header` | 参数绑定 |
+
+## 客户端注解
+
+| 注解 | 描述 |
+|------|------|
+| `@NettyClient` | 标记接口为 Netty 客户端 |
+| `@NettyRequest` | 标记方法为请求 |
+| `@Param` | 参数绑定 |
+| `@EnableNettyClients` | 启用客户端扫描 |
+
 ## 可用的 Profile（协议栈模板）
 
 | Profile | 传输层 | 描述 |
@@ -367,56 +456,80 @@ public class MyRouteResolver implements NettyRouteResolver {
 }
 ```
 
+### 自定义客户端 Profile
+
+```java
+@Component
+public class MyClientProfile implements ClientProfile {
+
+    @Override
+    public String getName() {
+        return "my-client-profile";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        pipeline.addLast("myDecoder", new MyDecoder());
+        pipeline.addLast("myEncoder", new MyEncoder());
+    }
+}
+```
+
 ## Actuator 集成
 
 当 classpath 中存在 `spring-boot-actuator` 时：
 
 | 端点 | 描述 |
 |------|------|
-| `GET /actuator/netty` | 列出所有 Netty 服务器详情 |
-| `GET /actuator/netty/{name}` | 获取指定服务器信息 |
-| `GET /actuator/health/netty` | 所有服务器健康检查 |
+| `GET /actuator/netty` | 列出所有 Netty 服务器和客户端 |
+| `GET /actuator/netty/servers` | 列出所有服务器详情 |
+| `GET /actuator/netty/servers/{name}` | 获取指定服务器信息 |
+| `GET /actuator/netty/clients` | 列出所有客户端详情 |
+| `GET /actuator/netty/clients/{name}` | 获取指定客户端信息 |
+| `GET /actuator/health/netty` | 所有组件健康检查 |
 
 ### 监控指标（Micrometer）
 
 | 指标 | 描述 |
 |------|------|
-| `netty.connections.current` | 当前活跃连接数 |
-| `netty.connections.total` | 启动以来总连接数 |
-| `netty.bytes.in` | 接收的总字节数 |
-| `netty.bytes.out` | 发送的总字节数 |
-| `netty.requests.total` | 按服务器/路由/状态统计的请求总数 |
-| `netty.request.latency` | 请求延迟直方图 |
+| `netty.server.connections.current` | 当前服务器连接数 |
+| `netty.server.connections.total` | 服务器总连接数 |
+| `netty.server.bytes.in` | 服务器接收字节数 |
+| `netty.server.bytes.out` | 服务器发送字节数 |
+| `netty.server.requests.total` | 服务器请求数 |
+| `netty.server.request.latency` | 服务器请求延迟 |
+| `netty.client.connections.current` | 当前客户端连接数 |
+| `netty.client.pool.size` | 连接池大小 |
+| `netty.client.pool.pending` | 等待连接请求数 |
+| `netty.client.requests.total` | 客户端请求数 |
+| `netty.client.request.latency` | 客户端请求延迟 |
+| `netty.client.reconnect.count` | 重连次数 |
 
 ## Pipeline 阶段
 
 Pipeline 被组织为 6 个固定阶段，确保行为可预测：
 
-1. **传输层/SSL** - SslHandler（如启用）
-2. **连接治理** - 连接限制、IP 过滤、代理协议
-3. **帧处理** - 帧解码器（TCP/UDP）
-4. **编解码** - ByteBuf ↔ Message（JSON/Protobuf）
-5. **业务分发** - DispatcherHandler（统一入口）
-6. **出站处理** - 编码器、指标、刷新策略
+| 阶段 | 描述 | Handlers |
+|------|------|----------|
+| 1. 传输层/SSL | 加密层 | `SslHandler` |
+| 2. 连接治理 | 连接管理 | `ConnectionLimitHandler`, `IpFilterHandler` |
+| 3. 帧处理 | 消息边界检测 | `LengthFieldBasedFrameDecoder`, `LineBasedFrameDecoder` |
+| 4. 编解码 | 序列化/反序列化 | `JsonCodecHandler`, `ProtobufCodecHandler` |
+| 5. 业务分发 | 请求路由 | `DispatcherHandler` |
+| 6. 出站处理 | 响应编码 | `MessageEncoder`, `MetricsHandler` |
 
-## 注解体系
+## 客户端组件
 
-### 基础元注解
-- `@NettyController` - HTTP/WebSocket 控制器
-- `@NettyMessageController` - TCP/UDP 消息控制器
-
-### TCP/UDP 注解
-- `@NettyMessageMapping(type="xxx")` - 消息类型映射
-
-### HTTP 注解
-- `@NettyHttpGet` / `@NettyHttpPost` / `@NettyHttpPut` / `@NettyHttpDelete`
-- 参数绑定：`@PathVar` / `@Query` / `@Header` / `@Body`
-
-### WebSocket 注解
-- `@NettyWsOnOpen` - 连接打开
-- `@NettyWsOnText` - 文本消息
-- `@NettyWsOnBinary` - 二进制消息
-- `@NettyWsOnClose` - 连接关闭
+| 组件 | 描述 |
+|------|------|
+| `ClientSpec` | 客户端配置规范 |
+| `ClientOrchestrator` | 管理客户端生命周期 |
+| `ConnectionPool` | 连接池管理（最大连接数、最小空闲、健康检查） |
+| `ReconnectManager` | 指数退避自动重连 |
+| `HeartbeatManager` | 定期心跳保活 |
+| `RequestInvoker` | 发送请求、匹配响应 |
+| `ResponseFuture` | 带超时的异步响应处理 |
+| `ClientProxyFactory` | 为接口生成动态代理 |
 
 ## 系统要求
 

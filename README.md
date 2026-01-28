@@ -14,6 +14,7 @@ Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and anno
 - **One Configuration, Multiple Protocols** - Start TCP/HTTP/WebSocket/UDP servers with a single YAML configuration
 - **Annotation-Based Routing** - Develop handlers like Spring MVC / Spring Messaging
 - **Profile-Based Protocol Stacks** - One-click protocol setup, with Feature-based capability overlay
+- **Client Support** - Declarative client interfaces with connection pooling, reconnection, and heartbeat
 - **Production Ready** - Built-in observability (metrics/health), graceful shutdown support
 - **Highly Extensible** - Advanced users can extend via Configurer/Codec/RouteResolver
 
@@ -21,49 +22,45 @@ Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and anno
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        User Side: Config + Annotations                   │
-│  ┌─────────────────────────┐    ┌─────────────────────────────────────┐ │
-│  │    application.yml      │    │  @NettyHttpGet / @NettyWsOnText     │ │
-│  │    netty.servers[*]     │    │  @NettyMessageMapping ...           │ │
-│  └─────────────────────────┘    └─────────────────────────────────────┘ │
+│                           application.yml                               │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
+│  │    netty.servers[*]         │    │    netty.clients[*]             │ │
+│  │    Server Configuration     │    │    Client Configuration         │ │
+│  └─────────────────────────────┘    └─────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+                    │                              │
+                    ▼                              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      Netty Spring Boot Starter                           │
-│  ┌────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │ NettyProperties│→ │AutoConfiguration│→ │ ServerOrchestrator      │  │
-│  │ ServerSpec     │  └─────────────────┘  │ (Multi-Server Manager)  │  │
-│  └────────────────┘                       └─────────────────────────┘  │
-│          │                                          │                   │
-│          ▼                                          ▼                   │
-│  ┌────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │TransportFactory│  │ PipelineAssembler│  │    ServerRuntime[*]    │  │
-│  │ TCP/UDP/HTTP   │  │ Profile+Features │  └─────────────────────────┘  │
-│  └────────────────┘  └─────────────────┘                                │
-│          │                    │                                         │
-│          ▼                    ▼                                         │
-│  ┌────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │ ProfileRegistry│  │ FeatureRegistry │  │   AnnotationRegistry    │  │
-│  │ (Built-in+Ext) │  │ ssl/idle/codec..│  │   (Scan Annotations)    │  │
-│  └────────────────┘  └─────────────────┘  └─────────────────────────┘  │
-│                              │                        │                 │
-│                              ▼                        ▼                 │
-│                      ┌─────────────────┐  ┌─────────────────────────┐  │
-│                      │     Router      │→ │      Dispatcher         │  │
-│                      │PATH/MESSAGE_TYPE│  │ Param Binding/Invoke    │  │
-│                      └─────────────────┘  └─────────────────────────┘  │
-│                              │                        │                 │
-│                              ▼                        ▼                 │
-│                      ┌─────────────────┐  ┌─────────────────────────┐  │
-│                      │     Codec       │  │    Observability        │  │
-│                      │ JSON/Protobuf   │  │ Metrics+Health+Tracing  │  │
-│                      └─────────────────┘  └─────────────────────────┘  │
+│                      netty-spring-boot-context                          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                       Shared Components                           │  │
+│  │  Codec │ Profile │ InboundMessage │ OutboundMessage │ NettyContext │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌────────────────────────┐        ┌────────────────────────────────┐  │
+│  │    Server Components    │        │       Client Components        │  │
+│  │  ┌──────────────────┐  │        │  ┌────────────────────────┐   │  │
+│  │  │ ServerOrchestrator│  │        │  │ ClientOrchestrator     │   │  │
+│  │  │ DispatcherHandler │  │        │  │ ConnectionPool         │   │  │
+│  │  │ Router            │  │        │  │ ReconnectManager       │   │  │
+│  │  │ Dispatcher        │  │        │  │ HeartbeatManager       │   │  │
+│  │  │ @NettyController  │  │        │  │ RequestInvoker         │   │  │
+│  │  └──────────────────┘  │        │  │ @NettyClient           │   │  │
+│  └────────────────────────┘        │  └────────────────────────┘   │  │
+│                                     └────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+                    │                              │
+                    ▼                              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           Netty Runtime                                  │
+│                     netty-spring-boot-actuator                          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  Metrics │ Health Check │ Endpoint │ Connection Stats │ Tracing   │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Netty Runtime                                 │
 │  ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────┐  │
 │  │  BossGroup  │ →  │ WorkerGroup │ →  │  ChannelPipeline           │  │
 │  └─────────────┘    └─────────────┘    │  (Staged Handlers)         │  │
@@ -75,9 +72,9 @@ Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and anno
 
 ```
 netty-spring-boot/
-├── netty-spring-boot-context/        # Core APIs, annotations, interfaces
+├── netty-spring-boot-context/        # Core APIs, annotations, interfaces (Server + Client)
 ├── netty-spring-boot-actuator/       # Metrics, health checks, endpoints
-├── netty-spring-boot-autoconfigure/  # Auto-configuration
+├── netty-spring-boot-autoconfigure/  # Auto-configuration (Server + Client)
 ├── netty-spring-boot-starter/        # Starter dependency aggregation
 └── samples/                          # Example applications
     └── sample-tcp-json/
@@ -239,6 +236,102 @@ public class WebSocketHandler {
 }
 ```
 
+## Client Usage
+
+### 1. Configure Clients
+
+```yaml
+netty:
+  clients:
+    - name: order-service
+      host: 127.0.0.1
+      port: 9000
+      profile: tcp-lengthfield-json
+      pool:
+        maxConnections: 10
+        minIdle: 2
+        maxIdleMs: 60000
+        acquireTimeoutMs: 5000
+      reconnect:
+        enabled: true
+        initialDelayMs: 1000
+        maxDelayMs: 30000
+        multiplier: 2.0
+        maxRetries: -1             # -1 = infinite
+      heartbeat:
+        enabled: true
+        intervalMs: 30000
+        timeoutMs: 5000
+        message: '{"type":"heartbeat"}'
+      timeout:
+        connectMs: 5000
+        requestMs: 10000
+```
+
+### 2. Define Client Interface
+
+```java
+@NettyClient(name = "order-service")
+public interface OrderClient {
+
+    @NettyRequest(type = "ping")
+    PongResponse ping();
+
+    @NettyRequest(type = "order", timeout = 5000)
+    CompletableFuture<OrderResponse> createOrder(OrderRequest request);
+}
+```
+
+### 3. Enable Client Scanning
+
+```java
+@SpringBootApplication
+@EnableNettyClients(basePackages = "com.example.clients")
+public class MyApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MyApplication.class, args);
+    }
+}
+```
+
+### 4. Use Client
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderClient orderClient;  // Auto-injected proxy
+
+    public void process() {
+        PongResponse pong = orderClient.ping();
+
+        orderClient.createOrder(request)
+            .thenAccept(response -> log.info("Order created: {}", response));
+    }
+}
+```
+
+## Server Annotations
+
+| Annotation | Description |
+|------------|-------------|
+| `@NettyController` | HTTP/WebSocket controller |
+| `@NettyMessageController` | TCP/UDP message controller |
+| `@NettyMessageMapping` | Message type mapping |
+| `@NettyHttpGet/Post/Put/Delete` | HTTP method mapping |
+| `@NettyWsOnOpen/Text/Binary/Close` | WebSocket event mapping |
+| `@PathVar` / `@Query` / `@Body` / `@Header` | Parameter binding |
+
+## Client Annotations
+
+| Annotation | Description |
+|------------|-------------|
+| `@NettyClient` | Marks interface as Netty client |
+| `@NettyRequest` | Marks method as request |
+| `@Param` | Parameter binding |
+| `@EnableNettyClients` | Enable client scanning |
+
 ## Available Profiles
 
 | Profile | Transport | Description |
@@ -363,37 +456,80 @@ public class MyRouteResolver implements NettyRouteResolver {
 }
 ```
 
+### Custom Client Profile
+
+```java
+@Component
+public class MyClientProfile implements ClientProfile {
+
+    @Override
+    public String getName() {
+        return "my-client-profile";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        pipeline.addLast("myDecoder", new MyDecoder());
+        pipeline.addLast("myEncoder", new MyEncoder());
+    }
+}
+```
+
 ## Actuator Integration
 
 When `spring-boot-actuator` is on the classpath:
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /actuator/netty` | List all Netty servers with details |
-| `GET /actuator/netty/{name}` | Get specific server information |
-| `GET /actuator/health/netty` | Health check for all servers |
+| `GET /actuator/netty` | List all Netty servers and clients |
+| `GET /actuator/netty/servers` | List all server details |
+| `GET /actuator/netty/servers/{name}` | Get specific server info |
+| `GET /actuator/netty/clients` | List all client details |
+| `GET /actuator/netty/clients/{name}` | Get specific client info |
+| `GET /actuator/health/netty` | Health check for all |
 
 ### Metrics (Micrometer)
 
 | Metric | Description |
 |--------|-------------|
-| `netty.connections.current` | Current active connections |
-| `netty.connections.total` | Total connections since startup |
-| `netty.bytes.in` | Total bytes received |
-| `netty.bytes.out` | Total bytes sent |
-| `netty.requests.total` | Total requests by server/route/status |
-| `netty.request.latency` | Request latency histogram |
+| `netty.server.connections.current` | Current server connections |
+| `netty.server.connections.total` | Total server connections |
+| `netty.server.bytes.in` | Server bytes received |
+| `netty.server.bytes.out` | Server bytes sent |
+| `netty.server.requests.total` | Server request count |
+| `netty.server.request.latency` | Server request latency |
+| `netty.client.connections.current` | Current client connections |
+| `netty.client.pool.size` | Connection pool size |
+| `netty.client.pool.pending` | Pending connection requests |
+| `netty.client.requests.total` | Client request count |
+| `netty.client.request.latency` | Client request latency |
+| `netty.client.reconnect.count` | Reconnection attempts |
 
 ## Pipeline Stages
 
 The pipeline is organized into 6 fixed stages for predictable behavior:
 
-1. **Transport/SSL** - SslHandler (if enabled)
-2. **Connection Governance** - Connection limit, IP filter, Proxy protocol
-3. **Framing** - Frame decoder (TCP/UDP)
-4. **Codec** - ByteBuf ↔ Message (JSON/Protobuf)
-5. **Business Dispatch** - DispatcherHandler (unified entry point)
-6. **Outbound** - Encoder, metrics, flush strategy
+| Stage | Description | Handlers |
+|-------|-------------|----------|
+| 1. Transport/SSL | Encryption layer | `SslHandler` |
+| 2. Connection Governance | Connection management | `ConnectionLimitHandler`, `IpFilterHandler` |
+| 3. Framing | Message boundary detection | `LengthFieldBasedFrameDecoder`, `LineBasedFrameDecoder` |
+| 4. Codec | Serialization/Deserialization | `JsonCodecHandler`, `ProtobufCodecHandler` |
+| 5. Business Dispatch | Request routing | `DispatcherHandler` |
+| 6. Outbound | Response encoding | `MessageEncoder`, `MetricsHandler` |
+
+## Client Components
+
+| Component | Description |
+|-----------|-------------|
+| `ClientSpec` | Client configuration specification |
+| `ClientOrchestrator` | Manages client lifecycle |
+| `ConnectionPool` | Manages connections (max, min idle, health check) |
+| `ReconnectManager` | Auto-reconnect with exponential backoff |
+| `HeartbeatManager` | Periodic heartbeat for keep-alive |
+| `RequestInvoker` | Sends requests, matches responses |
+| `ResponseFuture` | Async response handling with timeout |
+| `ClientProxyFactory` | Generates dynamic proxies for interfaces |
 
 ## Requirements
 
