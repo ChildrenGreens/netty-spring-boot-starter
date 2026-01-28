@@ -184,4 +184,84 @@ class ConnectionPoolTest {
         channel.close();
     }
 
+    @Test
+    void acquire_withIdleChannel_returnsIdleChannel() throws Exception {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        // Release a channel to the pool first
+        pool.release(channel);
+        assertThat(pool.getIdleConnections()).isEqualTo(1);
+
+        // Acquire should return the idle channel
+        io.netty.channel.Channel acquired = pool.acquire();
+        assertThat(acquired).isSameAs(channel);
+        assertThat(pool.getIdleConnections()).isEqualTo(0);
+
+        pool.close();
+        channel.close();
+    }
+
+    @Test
+    void acquire_withUnhealthyIdleChannel_skipsIt() throws Exception {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+        EmbeddedChannel healthyChannel = new EmbeddedChannel();
+        EmbeddedChannel unhealthyChannel = new EmbeddedChannel();
+        unhealthyChannel.close(); // Make it unhealthy
+
+        // This won't be added because it's closed
+        pool.release(unhealthyChannel);
+
+        // This will be added
+        pool.release(healthyChannel);
+
+        assertThat(pool.getIdleConnections()).isEqualTo(1);
+
+        pool.close();
+        healthyChannel.close();
+    }
+
+    @Test
+    void release_withPoolFull_closesChannel() {
+        // Set max connections to 1
+        clientSpec.getPool().setMaxConnections(1);
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+
+        EmbeddedChannel channel1 = new EmbeddedChannel();
+        EmbeddedChannel channel2 = new EmbeddedChannel();
+
+        pool.release(channel1);
+        assertThat(pool.getIdleConnections()).isEqualTo(1);
+
+        // Pool is full, channel2 should be closed
+        pool.release(channel2);
+        // Pool should still have only 1 connection
+        assertThat(pool.getIdleConnections()).isEqualTo(1);
+
+        pool.close();
+        channel1.close();
+        channel2.close();
+    }
+
+    @Test
+    void getTotalConnections_returnsZero_whenNoConnectionsCreated() {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+
+        // release doesn't increment totalConnections
+        assertThat(pool.getTotalConnections()).isEqualTo(0);
+
+        pool.close();
+    }
+
+    @Test
+    void setReconnectManager_allowsSettingManager() {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+        ReconnectManager manager = mock(ReconnectManager.class);
+
+        pool.setReconnectManager(manager);
+        // No exception thrown
+
+        pool.close();
+    }
+
 }
