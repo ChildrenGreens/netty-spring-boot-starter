@@ -18,15 +18,21 @@ package com.childrengreens.netty.spring.boot.context.client;
 
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import com.childrengreens.netty.spring.boot.context.properties.HeartbeatSpec;
+import io.netty.channel.Channel;
+import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link HeartbeatManager}.
@@ -172,6 +178,248 @@ class HeartbeatManagerTest {
         heartbeatManager.stop();
 
         assertThat(heartbeatManager.isRunning()).isFalse();
+    }
+
+    @Test
+    void sendHeartbeat_whenSuccessful_resetsConsecutiveFailures() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        CompletableFuture<Object> future = CompletableFuture.completedFuture("pong");
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong())).thenReturn(future);
+
+        AtomicBoolean successCalled = new AtomicBoolean(false);
+        heartbeatManager.setListener(new HeartbeatManager.HeartbeatListener() {
+            @Override
+            public void onHeartbeatSuccess() {
+                successCalled.set(true);
+            }
+
+            @Override
+            public void onHeartbeatFailure(Throwable cause) {
+            }
+
+            @Override
+            public void onConnectionUnhealthy() {
+            }
+        });
+
+        clientSpec.getHeartbeat().setIntervalMs(100);
+        heartbeatManager.start();
+
+        // Wait for heartbeat to be sent
+        Thread.sleep(200);
+
+        assertThat(successCalled.get()).isTrue();
+        assertThat(heartbeatManager.getConsecutiveFailures()).isEqualTo(0);
+
+        verify(connectionPool, atLeastOnce()).release(channel);
+
+        heartbeatManager.stop();
+        channel.close();
+    }
+
+    @Test
+    void sendHeartbeat_whenFailed_incrementsConsecutiveFailures() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        CompletableFuture<Object> future = new CompletableFuture<>();
+        future.completeExceptionally(new RuntimeException("Heartbeat failed"));
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong())).thenReturn(future);
+
+        AtomicBoolean failureCalled = new AtomicBoolean(false);
+        heartbeatManager.setListener(new HeartbeatManager.HeartbeatListener() {
+            @Override
+            public void onHeartbeatSuccess() {
+            }
+
+            @Override
+            public void onHeartbeatFailure(Throwable cause) {
+                failureCalled.set(true);
+            }
+
+            @Override
+            public void onConnectionUnhealthy() {
+            }
+        });
+
+        clientSpec.getHeartbeat().setIntervalMs(100);
+        heartbeatManager.start();
+
+        // Wait for heartbeat to be sent
+        Thread.sleep(200);
+
+        assertThat(failureCalled.get()).isTrue();
+
+        heartbeatManager.stop();
+        channel.close();
+    }
+
+    @Test
+    void sendHeartbeat_whenThreeConsecutiveFailures_triggersUnhealthy() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        CompletableFuture<Object> future = new CompletableFuture<>();
+        future.completeExceptionally(new RuntimeException("Heartbeat failed"));
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong())).thenReturn(future);
+
+        AtomicBoolean unhealthyCalled = new AtomicBoolean(false);
+        AtomicInteger failureCount = new AtomicInteger(0);
+        heartbeatManager.setListener(new HeartbeatManager.HeartbeatListener() {
+            @Override
+            public void onHeartbeatSuccess() {
+            }
+
+            @Override
+            public void onHeartbeatFailure(Throwable cause) {
+                failureCount.incrementAndGet();
+            }
+
+            @Override
+            public void onConnectionUnhealthy() {
+                unhealthyCalled.set(true);
+            }
+        });
+
+        clientSpec.getHeartbeat().setIntervalMs(50);
+        heartbeatManager.start();
+
+        // Wait for 3+ heartbeats
+        Thread.sleep(300);
+
+        assertThat(failureCount.get()).isGreaterThanOrEqualTo(3);
+        assertThat(unhealthyCalled.get()).isTrue();
+
+        heartbeatManager.stop();
+        channel.close();
+    }
+
+    @Test
+    void sendHeartbeat_whenNotRunning_doesNotSend() throws Exception {
+        // Don't start the heartbeat manager
+        assertThat(heartbeatManager.isRunning()).isFalse();
+
+        // Wait a bit
+        Thread.sleep(200);
+
+        // Should not have attempted any heartbeats
+        verify(connectionPool, never()).acquire();
+        verify(requestInvoker, never()).invoke(any(), anyString(), any(), anyLong());
+    }
+
+    @Test
+    void sendHeartbeat_releasesChannelAfterCompletion() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        CompletableFuture<Object> future = CompletableFuture.completedFuture("pong");
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong())).thenReturn(future);
+
+        clientSpec.getHeartbeat().setIntervalMs(100);
+        heartbeatManager.start();
+
+        Thread.sleep(200);
+
+        verify(connectionPool, atLeastOnce()).release(channel);
+
+        heartbeatManager.stop();
+        channel.close();
+    }
+
+    @Test
+    void sendHeartbeat_releasesChannelEvenOnFailure() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        CompletableFuture<Object> future = new CompletableFuture<>();
+        future.completeExceptionally(new RuntimeException("Failed"));
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong())).thenReturn(future);
+
+        clientSpec.getHeartbeat().setIntervalMs(100);
+        heartbeatManager.start();
+
+        Thread.sleep(200);
+
+        verify(connectionPool, atLeastOnce()).release(channel);
+
+        heartbeatManager.stop();
+        channel.close();
+    }
+
+    @Test
+    void sendHeartbeat_withAcquireException_handlesGracefully() throws Exception {
+        when(connectionPool.acquire()).thenThrow(new IllegalStateException("Pool closed"));
+
+        AtomicBoolean failureCalled = new AtomicBoolean(false);
+        heartbeatManager.setListener(new HeartbeatManager.HeartbeatListener() {
+            @Override
+            public void onHeartbeatSuccess() {
+            }
+
+            @Override
+            public void onHeartbeatFailure(Throwable cause) {
+                failureCalled.set(true);
+            }
+
+            @Override
+            public void onConnectionUnhealthy() {
+            }
+        });
+
+        clientSpec.getHeartbeat().setIntervalMs(100);
+        heartbeatManager.start();
+
+        Thread.sleep(200);
+
+        assertThat(failureCalled.get()).isTrue();
+
+        heartbeatManager.stop();
+    }
+
+    @Test
+    void sendHeartbeat_successAfterFailures_resetsCounter() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        // First 2 calls fail, then succeed
+        CompletableFuture<Object> failedFuture = new CompletableFuture<>();
+        failedFuture.completeExceptionally(new RuntimeException("Failed"));
+
+        CompletableFuture<Object> successFuture = CompletableFuture.completedFuture("pong");
+
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong()))
+                .thenReturn(failedFuture)
+                .thenReturn(failedFuture)
+                .thenReturn(successFuture);
+
+        AtomicInteger successCount = new AtomicInteger(0);
+        heartbeatManager.setListener(new HeartbeatManager.HeartbeatListener() {
+            @Override
+            public void onHeartbeatSuccess() {
+                successCount.incrementAndGet();
+            }
+
+            @Override
+            public void onHeartbeatFailure(Throwable cause) {
+            }
+
+            @Override
+            public void onConnectionUnhealthy() {
+            }
+        });
+
+        clientSpec.getHeartbeat().setIntervalMs(50);
+        heartbeatManager.start();
+
+        Thread.sleep(300);
+
+        assertThat(successCount.get()).isGreaterThanOrEqualTo(1);
+        assertThat(heartbeatManager.getConsecutiveFailures()).isEqualTo(0);
+
+        heartbeatManager.stop();
+        channel.close();
     }
 
 }

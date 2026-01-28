@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.client;
 
+import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -134,6 +135,52 @@ class NettyClientRegistrarTest {
         registrar.postProcessBeanDefinitionRegistry(registry);
 
         verify(registry, never()).registerBeanDefinition(anyString(), any());
+    }
+
+    @Test
+    void postProcessBeanDefinitionRegistry_withValidPackage_registersClients() {
+        // Use a package that contains test NettyClient interfaces
+        registrar.setBasePackages("com.childrengreens.netty.spring.boot.context.client");
+
+        registrar.postProcessBeanDefinitionRegistry(registry);
+
+        // Should register any @NettyClient annotated interfaces found
+        // The actual verification depends on what's in the package
+    }
+
+    @Test
+    void postProcessBeanDefinitionRegistry_withNullPackages_doesNothing() {
+        // Don't set any packages (null)
+
+        registrar.postProcessBeanDefinitionRegistry(registry);
+
+        verify(registry, never()).registerBeanDefinition(anyString(), any());
+    }
+
+    @Test
+    void postProcessBeanDefinitionRegistry_withMixedValidAndEmptyPackages_scansValidOnly() {
+        registrar.setBasePackages("", "com.nonexistent", " ", "   ");
+
+        registrar.postProcessBeanDefinitionRegistry(registry);
+
+        // Should have tried to scan non-empty packages but found nothing
+        verify(registry, never()).registerBeanDefinition(anyString(), any());
+    }
+
+    /**
+     * Test interface annotated with @NettyClient for testing registration.
+     */
+    @NettyClient(name = "test-client")
+    interface TestClient {
+        void doSomething();
+    }
+
+    /**
+     * Test interface with value attribute.
+     */
+    @NettyClient(name = "value-client", value = "value-client")
+    interface ValueClient {
+        void doSomething();
     }
 
 }

@@ -20,6 +20,7 @@ import com.childrengreens.netty.spring.boot.context.properties.ConnectionLimitSp
 import com.childrengreens.netty.spring.boot.context.properties.FeaturesSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -146,5 +147,100 @@ class ConnectionLimitFeatureProviderTest {
         provider.configure(pipeline, serverSpec);
 
         verify(pipeline).addLast(eq("connectionLimitHandler"), any());
+    }
+
+    @Test
+    void connectionLimitHandler_allowsConnectionsWithinLimit() {
+        ServerSpec realServerSpec = new ServerSpec();
+        realServerSpec.setName("test-server");
+        FeaturesSpec features = new FeaturesSpec();
+        ConnectionLimitSpec connLimit = new ConnectionLimitSpec();
+        connLimit.setEnabled(true);
+        connLimit.setMaxConnections(10);
+        features.setConnectionLimit(connLimit);
+        realServerSpec.setFeatures(features);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        provider.configure(channel.pipeline(), realServerSpec);
+
+        assertThat(channel.pipeline().get("connectionLimitHandler")).isNotNull();
+
+        // Simulate channel active event
+        channel.pipeline().fireChannelActive();
+
+        // Channel should still be open
+        assertThat(channel.isActive()).isTrue();
+
+        channel.close();
+    }
+
+    @Test
+    void connectionLimitHandler_rejectsConnectionsOverLimit() {
+        ServerSpec realServerSpec = new ServerSpec();
+        realServerSpec.setName("test-server");
+        FeaturesSpec features = new FeaturesSpec();
+        ConnectionLimitSpec connLimit = new ConnectionLimitSpec();
+        connLimit.setEnabled(true);
+        connLimit.setMaxConnections(2);
+        features.setConnectionLimit(connLimit);
+        realServerSpec.setFeatures(features);
+
+        // Create multiple channels using the same provider
+        EmbeddedChannel channel1 = new EmbeddedChannel();
+        EmbeddedChannel channel2 = new EmbeddedChannel();
+        EmbeddedChannel channel3 = new EmbeddedChannel();
+
+        provider.configure(channel1.pipeline(), realServerSpec);
+        provider.configure(channel2.pipeline(), realServerSpec);
+        provider.configure(channel3.pipeline(), realServerSpec);
+
+        // Activate first two channels
+        channel1.pipeline().fireChannelActive();
+        channel2.pipeline().fireChannelActive();
+
+        // Third channel should be rejected
+        channel3.pipeline().fireChannelActive();
+
+        // Channel 3 should be closed
+        assertThat(channel3.isOpen()).isFalse();
+
+        channel1.close();
+        channel2.close();
+    }
+
+    @Test
+    void connectionLimitHandler_decrementsOnChannelInactive() {
+        ServerSpec realServerSpec = new ServerSpec();
+        realServerSpec.setName("test-server");
+        FeaturesSpec features = new FeaturesSpec();
+        ConnectionLimitSpec connLimit = new ConnectionLimitSpec();
+        connLimit.setEnabled(true);
+        connLimit.setMaxConnections(2);
+        features.setConnectionLimit(connLimit);
+        realServerSpec.setFeatures(features);
+
+        EmbeddedChannel channel1 = new EmbeddedChannel();
+        EmbeddedChannel channel2 = new EmbeddedChannel();
+        EmbeddedChannel channel3 = new EmbeddedChannel();
+
+        provider.configure(channel1.pipeline(), realServerSpec);
+        provider.configure(channel2.pipeline(), realServerSpec);
+
+        channel1.pipeline().fireChannelActive();
+        channel2.pipeline().fireChannelActive();
+
+        // Close channel1
+        channel1.pipeline().fireChannelInactive();
+
+        // Now channel3 should be able to connect
+        provider.configure(channel3.pipeline(), realServerSpec);
+        channel3.pipeline().fireChannelActive();
+
+        assertThat(channel3.isActive()).isTrue();
+
+        channel1.close();
+        channel2.close();
+        channel3.close();
     }
 }
