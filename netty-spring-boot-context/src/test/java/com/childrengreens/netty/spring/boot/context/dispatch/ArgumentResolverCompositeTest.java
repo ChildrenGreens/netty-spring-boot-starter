@@ -23,7 +23,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Parameter;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,7 +51,19 @@ class ArgumentResolverCompositeTest {
     void addResolver_addsToList() {
         PathVariableArgumentResolver resolver = new PathVariableArgumentResolver();
         composite.addResolver(resolver);
-        assertThat(composite).isNotNull();
+        assertThat(composite.getResolvers()).hasSize(1);
+        assertThat(composite.getResolvers()).contains(resolver);
+    }
+
+    @Test
+    void addResolvers_addsMultipleToList() {
+        PathVariableArgumentResolver resolver1 = new PathVariableArgumentResolver();
+        QueryArgumentResolver resolver2 = new QueryArgumentResolver();
+
+        composite.addResolvers(Arrays.asList(resolver1, resolver2));
+
+        assertThat(composite.getResolvers()).hasSize(2);
+        assertThat(composite.getResolvers()).contains(resolver1, resolver2);
     }
 
     @Test
@@ -91,6 +105,39 @@ class ArgumentResolverCompositeTest {
         Object result = composite.resolveArgument(param, message, context, pathVars);
 
         assertThat(result).isEqualTo("path-value");
+    }
+
+    @Test
+    void getResolvers_initiallyEmpty() {
+        assertThat(composite.getResolvers()).isEmpty();
+    }
+
+    @Test
+    void getResolvers_returnsSameListInstance() {
+        List<ArgumentResolver> resolvers1 = composite.getResolvers();
+        List<ArgumentResolver> resolvers2 = composite.getResolvers();
+
+        assertThat(resolvers1).isSameAs(resolvers2);
+    }
+
+    @Test
+    void addResolver_calledMultipleTimes_addsAll() {
+        composite.addResolver(new PathVariableArgumentResolver());
+        composite.addResolver(new QueryArgumentResolver());
+        composite.addResolver(new PathVariableArgumentResolver());
+
+        assertThat(composite.getResolvers()).hasSize(3);
+    }
+
+    @Test
+    void resolveArgument_withEmptyResolverList_returnsNull() throws Exception {
+        Parameter param = TestController.class.getMethod("withPathVar", String.class)
+                .getParameters()[0];
+        Map<String, String> pathVars = new HashMap<>();
+
+        Object result = composite.resolveArgument(param, message, context, pathVars);
+
+        assertThat(result).isNull();
     }
 
     /**

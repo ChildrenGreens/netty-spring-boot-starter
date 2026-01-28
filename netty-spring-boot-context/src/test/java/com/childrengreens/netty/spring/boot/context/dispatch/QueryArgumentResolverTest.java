@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -99,6 +100,165 @@ class QueryArgumentResolverTest {
         assertThat(result).isEqualTo(5);
     }
 
+    @Test
+    void resolve_withLongType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withLongQuery", Long.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("id", "12345678901");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(12345678901L);
+    }
+
+    @Test
+    void resolve_withPrimitiveLongType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withPrimitiveLongQuery", long.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("id", "999");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(999L);
+    }
+
+    @Test
+    void resolve_withBooleanType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withBooleanQuery", Boolean.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("active", "true");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(true);
+    }
+
+    @Test
+    void resolve_withPrimitiveBooleanType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withPrimitiveBooleanQuery", boolean.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("active", "false");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(false);
+    }
+
+    @Test
+    void resolve_withDoubleType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withDoubleQuery", Double.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("price", "19.99");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(19.99);
+    }
+
+    @Test
+    void resolve_withPrimitiveDoubleType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withPrimitiveDoubleQuery", double.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("price", "29.99");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(29.99);
+    }
+
+    @Test
+    void resolve_withPrimitiveIntType_convertsValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withPrimitiveIntQuery", int.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("count", "42");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo(42);
+    }
+
+    @Test
+    void resolve_withDefaultValue_usesDefault() throws Exception {
+        Parameter param = TestController.class.getMethod("withDefaultValue", String.class)
+                .getParameters()[0];
+        when(message.getHeader("queryParams")).thenReturn(new HashMap<>());
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo("default");
+    }
+
+    @Test
+    void resolve_withNullQueryParams_returnsNull() throws Exception {
+        Parameter param = TestController.class.getMethod("withOptionalQuery", String.class)
+                .getParameters()[0];
+        when(message.getHeader("queryParams")).thenReturn(null);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void resolve_withMissingRequiredQuery_throwsException() throws Exception {
+        Parameter param = TestController.class.getMethod("withRequiredQuery", String.class)
+                .getParameters()[0];
+        when(message.getHeader("queryParams")).thenReturn(new HashMap<>());
+
+        assertThatThrownBy(() -> resolver.resolve(param, message, context, new HashMap<>()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Missing required query parameter");
+    }
+
+    @Test
+    void resolve_withNameAttribute_usesName() throws Exception {
+        Parameter param = TestController.class.getMethod("withNamedQuery", String.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("userName", "john");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo("john");
+    }
+
+    @Test
+    void resolve_withUnknownType_returnsStringValue() throws Exception {
+        Parameter param = TestController.class.getMethod("withObjectQuery", Object.class)
+                .getParameters()[0];
+
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("obj", "some-object");
+        when(message.getHeader("queryParams")).thenReturn(queryParams);
+
+        Object result = resolver.resolve(param, message, context, new HashMap<>());
+
+        assertThat(result).isEqualTo("some-object");
+    }
+
     /**
      * Test controller for parameter extraction.
      */
@@ -107,5 +267,16 @@ class QueryArgumentResolverTest {
         public void withOptionalQuery(@Query(value = "opt", required = false) String opt) {}
         public void withoutQuery(String name) {}
         public void withIntQuery(@Query(value = "page", required = false) Integer page) {}
+        public void withLongQuery(@Query(value = "id", required = false) Long id) {}
+        public void withPrimitiveLongQuery(@Query(value = "id", required = false) long id) {}
+        public void withBooleanQuery(@Query(value = "active", required = false) Boolean active) {}
+        public void withPrimitiveBooleanQuery(@Query(value = "active", required = false) boolean active) {}
+        public void withDoubleQuery(@Query(value = "price", required = false) Double price) {}
+        public void withPrimitiveDoubleQuery(@Query(value = "price", required = false) double price) {}
+        public void withPrimitiveIntQuery(@Query(value = "count", required = false) int count) {}
+        public void withDefaultValue(@Query(value = "def", required = false, defaultValue = "default") String def) {}
+        public void withRequiredQuery(@Query(value = "required", required = true) String required) {}
+        public void withNamedQuery(@Query(name = "userName", required = false) String user) {}
+        public void withObjectQuery(@Query(value = "obj", required = false) Object obj) {}
     }
 }

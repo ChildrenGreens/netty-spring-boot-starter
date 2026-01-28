@@ -20,6 +20,7 @@ import com.childrengreens.netty.spring.boot.context.properties.FeaturesSpec;
 import com.childrengreens.netty.spring.boot.context.properties.RateLimitSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -107,5 +108,78 @@ class RateLimitFeatureProviderTest {
         provider.configure(pipeline, serverSpec);
 
         verify(pipeline, never()).addLast(any(String.class), any());
+    }
+
+    @Test
+    void configure_withEmbeddedChannel_addsHandler() {
+        ServerSpec realServerSpec = new ServerSpec();
+        realServerSpec.setName("test-server");
+        FeaturesSpec features = new FeaturesSpec();
+        RateLimitSpec rateLimit = new RateLimitSpec();
+        rateLimit.setEnabled(true);
+        rateLimit.setRequestsPerSecond(100);
+        rateLimit.setBurstSize(50);
+        features.setRateLimit(rateLimit);
+        realServerSpec.setFeatures(features);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        provider.configure(channel.pipeline(), realServerSpec);
+
+        assertThat(channel.pipeline().get("rateLimitHandler")).isNotNull();
+        channel.close();
+    }
+
+    @Test
+    void configure_withZeroBurstSize_usesRequestsPerSecondAsDefault() {
+        ServerSpec realServerSpec = new ServerSpec();
+        realServerSpec.setName("test-server");
+        FeaturesSpec features = new FeaturesSpec();
+        RateLimitSpec rateLimit = new RateLimitSpec();
+        rateLimit.setEnabled(true);
+        rateLimit.setRequestsPerSecond(100);
+        rateLimit.setBurstSize(0); // zero burst size
+        features.setRateLimit(rateLimit);
+        realServerSpec.setFeatures(features);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        provider.configure(channel.pipeline(), realServerSpec);
+
+        assertThat(channel.pipeline().get("rateLimitHandler")).isNotNull();
+        channel.close();
+    }
+
+    @Test
+    void getName_returnsConstantValue() {
+        assertThat(provider.getName()).isEqualTo(RateLimitFeatureProvider.NAME);
+    }
+
+    @Test
+    void getOrder_returnsConstantValue() {
+        assertThat(provider.getOrder()).isEqualTo(RateLimitFeatureProvider.ORDER);
+    }
+
+    @Test
+    void rateLimitHandler_allowsRequestsWithinLimit() {
+        ServerSpec realServerSpec = new ServerSpec();
+        realServerSpec.setName("test-server");
+        FeaturesSpec features = new FeaturesSpec();
+        RateLimitSpec rateLimit = new RateLimitSpec();
+        rateLimit.setEnabled(true);
+        rateLimit.setRequestsPerSecond(1000); // High limit
+        rateLimit.setBurstSize(100);
+        features.setRateLimit(rateLimit);
+        realServerSpec.setFeatures(features);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+        provider.configure(channel.pipeline(), realServerSpec);
+
+        // Should be able to send messages within the limit
+        channel.writeInbound("test message");
+        String result = channel.readInbound();
+        assertThat(result).isEqualTo("test message");
+
+        channel.close();
     }
 }
