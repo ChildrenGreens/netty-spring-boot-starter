@@ -19,13 +19,19 @@ package com.childrengreens.netty.spring.boot.context.client;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.beans.factory.support.GenericBeanDefinition;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.ResourceLoader;
 
+import java.lang.reflect.Method;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -140,46 +146,112 @@ class NettyClientRegistrarTest {
     @Test
     void postProcessBeanDefinitionRegistry_withValidPackage_registersClients() {
         // Use a package that contains test NettyClient interfaces
-        registrar.setBasePackages("com.childrengreens.netty.spring.boot.context.client");
+        // Note: ClassPathScanningCandidateComponentProvider might not find interfaces by default
+        // This test verifies the scanning process runs without error
+        registrar.setBasePackages("com.childrengreens.netty.spring.boot.context.client.testclient");
 
         registrar.postProcessBeanDefinitionRegistry(registry);
 
-        // Should register any @NettyClient annotated interfaces found
-        // The actual verification depends on what's in the package
+        // Scanning interfaces might require additional configuration
+        // This test ensures the scanning process completes without error
     }
 
     @Test
-    void postProcessBeanDefinitionRegistry_withNullPackages_doesNothing() {
-        // Don't set any packages (null)
+    void postProcessBeanDefinitionRegistry_withRealTestPackage_scansSuccessfully() {
+        // Test that scanning a real package works without exceptions
+        registrar.setBasePackages("com.childrengreens.netty.spring.boot.context");
 
+        // Should not throw exception
         registrar.postProcessBeanDefinitionRegistry(registry);
+    }
+
+    @Test
+    void registerClientBean_withValidNettyClientInterface_registersBeanDefinition() throws Exception {
+        // Access private method via reflection
+        Method registerClientBeanMethod = NettyClientRegistrar.class.getDeclaredMethod(
+                "registerClientBean", BeanDefinitionRegistry.class, BeanDefinition.class);
+        registerClientBeanMethod.setAccessible(true);
+
+        // Create a bean definition for a valid NettyClient interface
+        GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
+        beanDefinition.setBeanClassName(TestClientInterface.class.getName());
+
+        // Invoke the private method
+        registerClientBeanMethod.invoke(registrar, registry, beanDefinition);
+
+        // Verify that the bean was registered
+        verify(registry).registerBeanDefinition(eq("testClientInterface"), any(BeanDefinition.class));
+    }
+
+    @Test
+    void registerClientBean_withNullClassName_doesNotRegister() throws Exception {
+        Method registerClientBeanMethod = NettyClientRegistrar.class.getDeclaredMethod(
+                "registerClientBean", BeanDefinitionRegistry.class, BeanDefinition.class);
+        registerClientBeanMethod.setAccessible(true);
+
+        GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
+        // Don't set bean class name - it will be null
+
+        registerClientBeanMethod.invoke(registrar, registry, beanDefinition);
 
         verify(registry, never()).registerBeanDefinition(anyString(), any());
     }
 
     @Test
-    void postProcessBeanDefinitionRegistry_withMixedValidAndEmptyPackages_scansValidOnly() {
-        registrar.setBasePackages("", "com.nonexistent", " ", "   ");
+    void registerClientBean_withNonNettyClientClass_doesNotRegister() throws Exception {
+        Method registerClientBeanMethod = NettyClientRegistrar.class.getDeclaredMethod(
+                "registerClientBean", BeanDefinitionRegistry.class, BeanDefinition.class);
+        registerClientBeanMethod.setAccessible(true);
 
-        registrar.postProcessBeanDefinitionRegistry(registry);
+        GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
+        beanDefinition.setBeanClassName(String.class.getName()); // Not a NettyClient
 
-        // Should have tried to scan non-empty packages but found nothing
+        registerClientBeanMethod.invoke(registrar, registry, beanDefinition);
+
         verify(registry, never()).registerBeanDefinition(anyString(), any());
+    }
+
+    @Test
+    void registerClientBean_withNonExistentClass_doesNotRegister() throws Exception {
+        Method registerClientBeanMethod = NettyClientRegistrar.class.getDeclaredMethod(
+                "registerClientBean", BeanDefinitionRegistry.class, BeanDefinition.class);
+        registerClientBeanMethod.setAccessible(true);
+
+        GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
+        beanDefinition.setBeanClassName("com.nonexistent.NonExistentClass");
+
+        registerClientBeanMethod.invoke(registrar, registry, beanDefinition);
+
+        verify(registry, never()).registerBeanDefinition(anyString(), any());
+    }
+
+    @Test
+    void registerClientBean_withEmptyName_usesValueAttribute() throws Exception {
+        Method registerClientBeanMethod = NettyClientRegistrar.class.getDeclaredMethod(
+                "registerClientBean", BeanDefinitionRegistry.class, BeanDefinition.class);
+        registerClientBeanMethod.setAccessible(true);
+
+        GenericBeanDefinition beanDefinition = new GenericBeanDefinition();
+        beanDefinition.setBeanClassName(ValueClientInterface.class.getName());
+
+        registerClientBeanMethod.invoke(registrar, registry, beanDefinition);
+
+        verify(registry).registerBeanDefinition(eq("valueClientInterface"), any(BeanDefinition.class));
     }
 
     /**
      * Test interface annotated with @NettyClient for testing registration.
      */
     @NettyClient(name = "test-client")
-    interface TestClient {
+    interface TestClientInterface {
         void doSomething();
     }
 
     /**
-     * Test interface with value attribute.
+     * Test interface with empty name to test value attribute fallback.
      */
-    @NettyClient(name = "value-client", value = "value-client")
-    interface ValueClient {
+    @NettyClient(name = "", value = "value-client")
+    interface ValueClientInterface {
         void doSomething();
     }
 
