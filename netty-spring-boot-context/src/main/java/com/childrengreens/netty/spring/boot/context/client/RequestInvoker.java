@@ -200,14 +200,12 @@ public class RequestInvoker {
      * Start the timeout checker task.
      */
     private void startTimeoutChecker() {
-        timeoutScheduler.scheduleAtFixedRate(() -> {
-            pendingRequests.forEach((correlationId, future) -> {
-                if (future.cancelIfExpired()) {
-                    pendingRequests.remove(correlationId);
-                    logger.debug("Request timed out: correlationId={}", correlationId);
-                }
-            });
-        }, 1000, 1000, TimeUnit.MILLISECONDS);
+        timeoutScheduler.scheduleAtFixedRate(() -> pendingRequests.forEach((correlationId, future) -> {
+            if (future.cancelIfExpired()) {
+                pendingRequests.remove(correlationId);
+                logger.debug("Request timed out: correlationId={}", correlationId);
+            }
+        }), 1000, 1000, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -225,9 +223,7 @@ public class RequestInvoker {
         timeoutScheduler.shutdown();
 
         // Cancel all pending requests
-        pendingRequests.forEach((correlationId, future) -> {
-            future.completeExceptionally(new CancellationException("Request invoker closed"));
-        });
+        pendingRequests.forEach((correlationId, future) -> future.completeExceptionally(new CancellationException("Request invoker closed")));
         pendingRequests.clear();
 
         logger.info("Request invoker closed for client [{}]", clientSpec.getName());

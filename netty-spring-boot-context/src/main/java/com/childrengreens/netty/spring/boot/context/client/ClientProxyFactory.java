@@ -172,16 +172,12 @@ public class ClientProxyFactory {
          * Handle Object class methods.
          */
         private Object handleObjectMethod(Object proxy, Method method, Object[] args) {
-            switch (method.getName()) {
-                case "toString":
-                    return "NettyClient[" + clientName + "]@" + interfaceType.getSimpleName();
-                case "hashCode":
-                    return System.identityHashCode(proxy);
-                case "equals":
-                    return proxy == args[0];
-                default:
-                    throw new UnsupportedOperationException(method.getName());
-            }
+            return switch (method.getName()) {
+                case "toString" -> "NettyClient[" + clientName + "]@" + interfaceType.getSimpleName();
+                case "hashCode" -> System.identityHashCode(proxy);
+                case "equals" -> proxy == args[0];
+                default -> throw new UnsupportedOperationException(method.getName());
+            };
         }
 
         /**
@@ -221,7 +217,6 @@ public class ClientProxyFactory {
         /**
          * Convert the result to the expected return type.
          */
-        @SuppressWarnings("unchecked")
         private Object convertResult(Object result, Method method) {
             if (result == null) {
                 return null;

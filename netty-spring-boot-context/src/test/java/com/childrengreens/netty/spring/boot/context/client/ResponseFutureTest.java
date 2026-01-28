@@ -69,7 +69,7 @@ class ResponseFutureTest {
 
         assertThat(completed).isTrue();
         assertThat(future.isDone()).isTrue();
-        assertThatThrownBy(() -> future.get())
+        assertThatThrownBy(future::get)
                 .hasCauseInstanceOf(RuntimeException.class)
                 .hasMessageContaining("test error");
     }
@@ -110,7 +110,7 @@ class ResponseFutureTest {
 
         assertThat(cancelled).isTrue();
         assertThat(future.isDone()).isTrue();
-        assertThatThrownBy(() -> future.get())
+        assertThatThrownBy(future::get)
                 .hasCauseInstanceOf(TimeoutException.class);
     }
 

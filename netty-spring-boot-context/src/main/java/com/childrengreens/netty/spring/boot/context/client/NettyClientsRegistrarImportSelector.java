@@ -20,11 +20,10 @@ import com.childrengreens.netty.spring.boot.context.annotation.EnableNettyClient
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
-import org.springframework.context.annotation.ImportSelector;
 import org.springframework.core.annotation.AnnotationAttributes;
 import org.springframework.core.type.AnnotationMetadata;
+import org.springframework.lang.NonNull;
 import org.springframework.util.ClassUtils;
-import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -44,7 +43,7 @@ public class NettyClientsRegistrarImportSelector implements ImportBeanDefinition
 
     @Override
     public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata,
-                                         BeanDefinitionRegistry registry) {
+                                        @NonNull BeanDefinitionRegistry registry) {
         AnnotationAttributes attrs = AnnotationAttributes.fromMap(
                 importingClassMetadata.getAnnotationAttributes(EnableNettyClients.class.getName()));
 
