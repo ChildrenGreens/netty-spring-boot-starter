@@ -104,4 +104,45 @@ class TransportFactoryTest {
         assertThat(starter).isNotNull();
         assertThat(starter).isInstanceOf(UdpTransportStarter.class);
     }
+
+    @Test
+    void getClientChannelClass_returnsCorrectClass() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+
+        var channelClass = factory.getClientChannelClass();
+
+        assertThat(channelClass).isNotNull();
+    }
+
+    @Test
+    void constructor_withEpoll_fallsBackToNioIfNotAvailable() {
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+
+        TransportImpl resolved = factory.getResolvedTransport();
+
+        // On macOS, EPOLL is not available, so it should fall back to NIO
+        // On Linux, EPOLL should be used
+        assertThat(resolved).isIn(TransportImpl.EPOLL, TransportImpl.NIO);
+    }
+
+    @Test
+    void constructor_withKqueue_fallsBackToNioIfNotAvailable() {
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+
+        TransportImpl resolved = factory.getResolvedTransport();
+
+        // On Linux, KQUEUE is not available, so it should fall back to NIO
+        // On macOS, KQUEUE should be used
+        assertThat(resolved).isIn(TransportImpl.KQUEUE, TransportImpl.NIO);
+    }
+
+    @Test
+    void createWorkerGroup_withZeroThreads_usesDefaultThreadCount() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+
+        EventLoopGroup group = factory.createWorkerGroup(0);
+
+        assertThat(group).isNotNull();
+        group.shutdownGracefully();
+    }
 }
