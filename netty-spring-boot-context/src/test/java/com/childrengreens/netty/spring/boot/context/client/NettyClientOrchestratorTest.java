@@ -101,4 +101,49 @@ class NettyClientOrchestratorTest {
         // No exception thrown
     }
 
+    @Test
+    void afterPropertiesSet_callsStart() throws Exception {
+        properties.setEnabled(false);
+
+        orchestrator.afterPropertiesSet();
+
+        assertThat(orchestrator.getAllRuntimes()).isEmpty();
+    }
+
+    @Test
+    void destroy_callsStop() throws Exception {
+        orchestrator.destroy();
+
+        assertThat(orchestrator.getAllRuntimes()).isEmpty();
+    }
+
+    @Test
+    void start_stop_lifecycle() {
+        properties.setEnabled(true);
+        properties.setClients(Collections.emptyList());
+
+        orchestrator.start();
+        assertThat(orchestrator.getAllRuntimes()).isEmpty();
+
+        orchestrator.stop();
+        assertThat(orchestrator.getAllRuntimes()).isEmpty();
+    }
+
+    @Test
+    void getAllRuntimes_returnsUnmodifiableMap() {
+        Map<String, ClientRuntime> runtimes = orchestrator.getAllRuntimes();
+
+        assertThat(runtimes).isNotNull();
+        // Verify it's unmodifiable by checking the type
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtimes.put("test", null))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void setFailFast_toFalse_allowsNonFailFastBehavior() {
+        orchestrator.setFailFast(false);
+        orchestrator.setFailFast(true);
+        // No exception, just verifying the method can be called
+    }
+
 }

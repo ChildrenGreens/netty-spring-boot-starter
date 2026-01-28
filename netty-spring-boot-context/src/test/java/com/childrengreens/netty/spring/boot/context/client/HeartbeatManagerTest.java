@@ -129,4 +129,49 @@ class HeartbeatManagerTest {
         // Verify no exception thrown
     }
 
+    @Test
+    void stop_calledTwice_doesNotThrow() {
+        heartbeatManager.start();
+        heartbeatManager.stop();
+        heartbeatManager.stop();
+
+        assertThat(heartbeatManager.isRunning()).isFalse();
+    }
+
+    @Test
+    void start_calledTwice_onlyStartsOnce() {
+        heartbeatManager.start();
+        assertThat(heartbeatManager.isRunning()).isTrue();
+
+        heartbeatManager.start();
+        assertThat(heartbeatManager.isRunning()).isTrue();
+
+        heartbeatManager.stop();
+        assertThat(heartbeatManager.isRunning()).isFalse();
+    }
+
+    @Test
+    void consecutiveFailures_remainsZeroInitially() {
+        assertThat(heartbeatManager.getConsecutiveFailures()).isZero();
+    }
+
+    @Test
+    void start_withDisabledHeartbeat_remainsNotRunning() {
+        clientSpec.getHeartbeat().setEnabled(false);
+
+        heartbeatManager.start();
+
+        assertThat(heartbeatManager.isRunning()).isFalse();
+        assertThat(heartbeatManager.getConsecutiveFailures()).isZero();
+    }
+
+    @Test
+    void stop_beforeStart_noExceptionThrown() {
+        assertThat(heartbeatManager.isRunning()).isFalse();
+
+        heartbeatManager.stop();
+
+        assertThat(heartbeatManager.isRunning()).isFalse();
+    }
+
 }

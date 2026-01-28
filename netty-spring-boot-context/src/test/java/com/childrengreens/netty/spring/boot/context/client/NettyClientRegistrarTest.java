@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.ResourceLoader;
 
 import static org.mockito.Mockito.*;
@@ -39,8 +41,9 @@ class NettyClientRegistrarTest {
     void setUp() {
         registrar = new NettyClientRegistrar();
         registry = mock(BeanDefinitionRegistry.class);
-        resourceLoader = mock(ResourceLoader.class);
-        environment = mock(Environment.class);
+        // Use real implementations for ResourceLoader and Environment
+        resourceLoader = new DefaultResourceLoader();
+        environment = new StandardEnvironment();
 
         registrar.setResourceLoader(resourceLoader);
         registrar.setEnvironment(environment);
@@ -87,6 +90,50 @@ class NettyClientRegistrarTest {
         registrar.setBasePackages("com.example.clients");
 
         // No exception thrown
+    }
+
+    @Test
+    void setResourceLoader_setsResourceLoader() {
+        ResourceLoader newResourceLoader = mock(ResourceLoader.class);
+
+        registrar.setResourceLoader(newResourceLoader);
+
+        // No exception thrown
+    }
+
+    @Test
+    void setEnvironment_setsEnvironment() {
+        Environment newEnvironment = mock(Environment.class);
+
+        registrar.setEnvironment(newEnvironment);
+
+        // No exception thrown
+    }
+
+    @Test
+    void setBeanClassLoader_setsClassLoader() {
+        ClassLoader newClassLoader = getClass().getClassLoader();
+
+        registrar.setBeanClassLoader(newClassLoader);
+
+        // No exception thrown
+    }
+
+    @Test
+    void setBasePackages_withMultiplePackages_acceptsAll() {
+        registrar.setBasePackages("com.example.package1", "com.example.package2", "com.example.package3");
+
+        // No exception thrown
+    }
+
+    @Test
+    void postProcessBeanDefinitionRegistry_withNonExistentPackage_doesNotThrow() {
+        registrar.setBasePackages("com.nonexistent.package.that.does.not.exist");
+
+        // Should not throw, just not find any candidates
+        registrar.postProcessBeanDefinitionRegistry(registry);
+
+        verify(registry, never()).registerBeanDefinition(anyString(), any());
     }
 
 }

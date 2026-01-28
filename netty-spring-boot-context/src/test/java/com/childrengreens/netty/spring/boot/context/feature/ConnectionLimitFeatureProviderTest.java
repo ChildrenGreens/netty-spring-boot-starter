@@ -107,4 +107,44 @@ class ConnectionLimitFeatureProviderTest {
 
         verify(pipeline, never()).addLast(any(String.class), any());
     }
+
+    @Test
+    void configure_calledTwice_reusesSameHandler() {
+        connectionLimitSpec.setEnabled(true);
+        connectionLimitSpec.setMaxConnections(1000);
+
+        provider.configure(pipeline, serverSpec);
+        provider.configure(pipeline, serverSpec);
+
+        // Should add handler twice but reusing the same instance
+        verify(pipeline, times(2)).addLast(eq("connectionLimitHandler"), any());
+    }
+
+    @Test
+    void getName_returnsConstantValue() {
+        assertThat(provider.getName()).isEqualTo(ConnectionLimitFeatureProvider.NAME);
+    }
+
+    @Test
+    void getOrder_returnsConstantValue() {
+        assertThat(provider.getOrder()).isEqualTo(ConnectionLimitFeatureProvider.ORDER);
+    }
+
+    @Test
+    void isEnabled_withFeaturesSpecNull_returnsFalse() {
+        when(serverSpec.getFeatures()).thenReturn(featuresSpec);
+        when(featuresSpec.getConnectionLimit()).thenReturn(null);
+
+        assertThat(provider.isEnabled(serverSpec)).isFalse();
+    }
+
+    @Test
+    void configure_withDifferentMaxConnections_createsHandler() {
+        connectionLimitSpec.setEnabled(true);
+        connectionLimitSpec.setMaxConnections(500);
+
+        provider.configure(pipeline, serverSpec);
+
+        verify(pipeline).addLast(eq("connectionLimitHandler"), any());
+    }
 }

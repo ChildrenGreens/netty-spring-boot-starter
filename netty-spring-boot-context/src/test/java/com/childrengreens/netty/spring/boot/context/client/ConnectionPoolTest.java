@@ -134,4 +134,54 @@ class ConnectionPoolTest {
         pool.close();
     }
 
+    @Test
+    void release_withInactiveChannel_doesNotReturnToPool() {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+        EmbeddedChannel channel = new EmbeddedChannel();
+        channel.close();
+
+        pool.release(channel);
+
+        assertThat(pool.getIdleConnections()).isEqualTo(0);
+
+        pool.close();
+    }
+
+    @Test
+    void getIdleConnections_afterRelease_increments() {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        pool.release(channel);
+
+        // release adds to idle but doesn't increment totalConnections
+        // totalConnections is only incremented by createChannel
+        assertThat(pool.getIdleConnections()).isEqualTo(1);
+
+        pool.close();
+        channel.close();
+    }
+
+    @Test
+    void close_calledTwice_doesNotThrow() {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+
+        pool.close();
+        pool.close();
+
+        // No exception thrown
+    }
+
+    @Test
+    void release_afterClose_doesNotAddToPool() {
+        ConnectionPool pool = new ConnectionPool(clientSpec, bootstrap);
+        pool.close();
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+        pool.release(channel);
+
+        assertThat(pool.getIdleConnections()).isEqualTo(0);
+        channel.close();
+    }
+
 }

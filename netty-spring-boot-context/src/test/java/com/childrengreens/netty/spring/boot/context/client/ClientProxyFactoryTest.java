@@ -126,4 +126,18 @@ class ClientProxyFactoryTest {
         void doSomething();
     }
 
+    @NettyClient(name = "value-client", value = "value-client")
+    interface ValueAnnotatedClient {
+        @NettyRequest(type = "ping", value = "ping")
+        String ping();
+    }
+
+    @Test
+    void createProxy_withValueAnnotation_usesValue() {
+        ValueAnnotatedClient proxy = proxyFactory.createProxy(ValueAnnotatedClient.class);
+
+        assertThat(proxy).isNotNull();
+        assertThat(proxy.toString()).contains("value-client");
+    }
+
 }

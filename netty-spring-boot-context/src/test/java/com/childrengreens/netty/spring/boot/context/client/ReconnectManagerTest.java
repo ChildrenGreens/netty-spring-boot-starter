@@ -123,4 +123,53 @@ class ReconnectManagerTest {
         // Verify no exception thrown
     }
 
+    @Test
+    void scheduleReconnect_whenMaxRetriesReached_stillSchedulesInitially() {
+        // maxRetries is checked in doReconnect, not scheduleReconnect
+        // scheduleReconnect will still set reconnecting to true
+        clientSpec.getReconnect().setMaxRetries(0);
+
+        reconnectManager.scheduleReconnect();
+
+        // Will be marked as reconnecting after schedule
+        // The max retries check happens in doReconnect
+        assertThat(reconnectManager.isReconnecting()).isTrue();
+    }
+
+    @Test
+    void scheduleReconnect_whenEnabled_startsReconnecting() {
+        reconnectManager.scheduleReconnect();
+
+        // Should be marked as reconnecting after schedule
+        assertThat(reconnectManager.isReconnecting()).isTrue();
+    }
+
+    @Test
+    void stop_whenReconnecting_cancelsScheduledTask() {
+        reconnectManager.scheduleReconnect();
+        assertThat(reconnectManager.isReconnecting()).isTrue();
+
+        reconnectManager.stop();
+
+        assertThat(reconnectManager.isReconnecting()).isFalse();
+    }
+
+    @Test
+    void stop_calledMultipleTimes_doesNotThrow() {
+        reconnectManager.stop();
+        reconnectManager.stop();
+        reconnectManager.stop();
+
+        // No exception thrown
+    }
+
+    @Test
+    void scheduleReconnect_afterStop_doesNotReconnect() {
+        reconnectManager.stop();
+
+        reconnectManager.scheduleReconnect();
+
+        assertThat(reconnectManager.isReconnecting()).isFalse();
+    }
+
 }
