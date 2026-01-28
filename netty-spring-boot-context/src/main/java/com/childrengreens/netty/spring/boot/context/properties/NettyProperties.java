@@ -65,6 +65,11 @@ public class NettyProperties {
     private List<ServerSpec> servers = new ArrayList<>();
 
     /**
+     * List of client specifications to be created.
+     */
+    private List<ClientSpec> clients = new ArrayList<>();
+
+    /**
      * Observability settings for metrics and health checks.
      */
     @NestedConfigurationProperty
@@ -116,6 +121,22 @@ public class NettyProperties {
      */
     public void setServers(List<ServerSpec> servers) {
         this.servers = servers;
+    }
+
+    /**
+     * Return the list of client specifications.
+     * @return the client specifications
+     */
+    public List<ClientSpec> getClients() {
+        return this.clients;
+    }
+
+    /**
+     * Set the list of client specifications.
+     * @param clients the client specifications
+     */
+    public void setClients(List<ClientSpec> clients) {
+        this.clients = clients;
     }
 
     /**

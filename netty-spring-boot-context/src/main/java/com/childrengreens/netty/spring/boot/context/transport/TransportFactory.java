@@ -23,11 +23,15 @@ import io.netty.channel.ServerChannel;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
+import io.netty.channel.epoll.EpollSocketChannel;
 import io.netty.channel.kqueue.KQueue;
 import io.netty.channel.kqueue.KQueueEventLoopGroup;
 import io.netty.channel.kqueue.KQueueServerSocketChannel;
+import io.netty.channel.kqueue.KQueueSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -122,6 +126,18 @@ public class TransportFactory {
             case EPOLL -> EpollServerSocketChannel.class;
             case KQUEUE -> KQueueServerSocketChannel.class;
             default -> NioServerSocketChannel.class;
+        };
+    }
+
+    /**
+     * Get the client channel class for TCP.
+     * @return the client channel class
+     */
+    public Class<? extends SocketChannel> getClientChannelClass() {
+        return switch (resolvedTransport) {
+            case EPOLL -> EpollSocketChannel.class;
+            case KQUEUE -> KQueueSocketChannel.class;
+            default -> NioSocketChannel.class;
         };
     }
 

@@ -17,6 +17,12 @@
 package com.childrengreens.netty.spring.boot.autoconfigure.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.childrengreens.netty.spring.boot.context.client.ClientPipelineAssembler;
+import com.childrengreens.netty.spring.boot.context.client.ClientProfile;
+import com.childrengreens.netty.spring.boot.context.client.ClientProfileRegistry;
+import com.childrengreens.netty.spring.boot.context.client.ClientProxyFactory;
+import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrator;
+import com.childrengreens.netty.spring.boot.context.client.TcpLengthFieldJsonClientProfile;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
 import com.childrengreens.netty.spring.boot.context.dispatch.ArgumentResolver;
@@ -228,6 +234,68 @@ public class NettyAutoConfiguration {
                                                             TransportFactory transportFactory,
                                                             PipelineAssembler pipelineAssembler) {
         return new NettyServerOrchestrator(properties, transportFactory, pipelineAssembler);
+    }
+
+    // ==================== Client Configuration ====================
+
+    /**
+     * Create the client profile registry with built-in profiles.
+     * @param profiles additional client profiles from the application context
+     * @return the client profile registry
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public ClientProfileRegistry clientProfileRegistry(ObjectProvider<ClientProfile> profiles) {
+        ClientProfileRegistry registry = new ClientProfileRegistry();
+
+        // Register built-in client profiles
+        registry.register(new TcpLengthFieldJsonClientProfile());
+
+        // Register custom profiles
+        profiles.forEach(registry::register);
+
+        return registry;
+    }
+
+    /**
+     * Create the client pipeline assembler.
+     * @param clientProfileRegistry the client profile registry
+     * @param codecRegistry the codec registry
+     * @return the client pipeline assembler
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public ClientPipelineAssembler clientPipelineAssembler(ClientProfileRegistry clientProfileRegistry,
+                                                            CodecRegistry codecRegistry) {
+        return new ClientPipelineAssembler(clientProfileRegistry, codecRegistry);
+    }
+
+    /**
+     * Create the client orchestrator.
+     * @param properties the Netty properties
+     * @param transportFactory the transport factory
+     * @param clientPipelineAssembler the client pipeline assembler
+     * @param codecRegistry the codec registry
+     * @return the client orchestrator
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public NettyClientOrchestrator nettyClientOrchestrator(NettyProperties properties,
+                                                            TransportFactory transportFactory,
+                                                            ClientPipelineAssembler clientPipelineAssembler,
+                                                            CodecRegistry codecRegistry) {
+        return new NettyClientOrchestrator(properties, transportFactory, clientPipelineAssembler, codecRegistry);
+    }
+
+    /**
+     * Create the client proxy factory.
+     * @param orchestrator the client orchestrator
+     * @return the client proxy factory
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public ClientProxyFactory clientProxyFactory(NettyClientOrchestrator orchestrator) {
+        return new ClientProxyFactory(orchestrator);
     }
 
 }
