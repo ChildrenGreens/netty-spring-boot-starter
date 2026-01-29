@@ -539,7 +539,10 @@ class ConnectionPoolTest {
         ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
 
         // Wait for maintenance task to ensure min idle
-        Thread.sleep(200);
+        long deadline = System.currentTimeMillis() + 1000;
+        while (System.currentTimeMillis() < deadline && pool.getIdleConnections() < 2) {
+            Thread.sleep(20);
+        }
 
         // Should have created at least minIdle connections
         assertThat(pool.getIdleConnections()).isGreaterThanOrEqualTo(2);

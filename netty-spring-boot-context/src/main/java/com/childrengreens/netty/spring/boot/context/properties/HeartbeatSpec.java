@@ -54,6 +54,11 @@ public class HeartbeatSpec {
     private String message = "{\"type\":\"heartbeat\"}";
 
     /**
+     * The heartbeat request type.
+     */
+    private String requestType = "heartbeat";
+
+    /**
      * The expected heartbeat response type.
      */
     private String responseType = "heartbeat";
@@ -120,6 +125,22 @@ public class HeartbeatSpec {
      */
     public void setMessage(String message) {
         this.message = message;
+    }
+
+    /**
+     * Return the request type.
+     * @return the request type
+     */
+    public String getRequestType() {
+        return this.requestType;
+    }
+
+    /**
+     * Set the request type.
+     * @param requestType the request type
+     */
+    public void setRequestType(String requestType) {
+        this.requestType = requestType;
     }
 
     /**

@@ -157,7 +157,7 @@ public class HeartbeatManager {
             // Send heartbeat and wait for response
             Object response = requestInvoker.invoke(
                     channel,
-                    heartbeatSpec.getResponseType(),
+                    heartbeatSpec.getRequestType(),
                     heartbeatSpec.getMessage(),
                     heartbeatSpec.getTimeoutMs()
             ).get(heartbeatSpec.getTimeoutMs(), TimeUnit.MILLISECONDS);

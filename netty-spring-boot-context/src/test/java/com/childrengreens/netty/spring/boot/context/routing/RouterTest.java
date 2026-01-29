@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests for {@link Router}.
@@ -327,6 +328,40 @@ class RouterTest {
         assertThat(exceptionOccurred.get())
                 .withFailMessage("Exceptions occurred: " + exceptions)
                 .isFalse();
+    }
+
+    @Test
+    void register_duplicateExactRoute_throwsException() throws Exception {
+        Method method = TestController.class.getMethod("handleGet");
+        TestController controller = new TestController();
+
+        RouteDefinition route1 = new RouteDefinition("/api/users", "GET",
+                controller, method, Void.class, "serverA");
+        RouteDefinition route2 = new RouteDefinition("/api/users", "GET",
+                controller, method, Void.class, "serverA");
+
+        router.register(route1);
+
+        assertThatThrownBy(() -> router.register(route2))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Duplicate route registration");
+    }
+
+    @Test
+    void register_duplicatePatternRoute_throwsException() throws Exception {
+        Method method = TestController.class.getMethod("handleGet");
+        TestController controller = new TestController();
+
+        RouteDefinition route1 = new RouteDefinition("/api/users/{id}", "GET",
+                controller, method, Void.class, null);
+        RouteDefinition route2 = new RouteDefinition("/api/users/{id}", "GET",
+                controller, method, Void.class, "");
+
+        router.register(route1);
+
+        assertThatThrownBy(() -> router.register(route2))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Duplicate route registration");
     }
 
     // Test controller class

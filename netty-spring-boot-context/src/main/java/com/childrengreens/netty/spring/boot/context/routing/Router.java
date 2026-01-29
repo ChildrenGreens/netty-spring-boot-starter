@@ -56,7 +56,7 @@ public class Router {
     /**
      * Routes indexed by route key for exact matching.
      */
-    private final Map<String, List<RouteDefinition>> exactRoutes = new ConcurrentHashMap<>();
+    private final Map<String, CopyOnWriteArrayList<RouteDefinition>> exactRoutes = new ConcurrentHashMap<>();
 
     /**
      * Routes with path variables for pattern matching.
@@ -74,13 +74,29 @@ public class Router {
         if (containsPathVariable(route.getRouteKey())) {
             // Register as pattern route
             Pattern pattern = compilePathPattern(route.getRouteKey());
+            // Check for duplicate pattern route (routeKey + httpMethod + serverName)
+            for (PatternRoute existing : patternRoutes) {
+                if (existing.route.getRouteKey().equals(route.getRouteKey())
+                        && equalsHttpMethod(existing.route.getHttpMethod(), route.getHttpMethod())
+                        && equalsServerName(existing.route.getServerName(), route.getServerName())) {
+                    throw new IllegalStateException("Duplicate route registration: " + key
+                            + " (server=" + normalizeServerName(route.getServerName()) + ")");
+                }
+            }
             patternRoutes.add(new PatternRoute(pattern, route));
             logger.debug("Registered pattern route: {} -> {}", route.getRouteKey(), route.getMethod());
         } else {
             // Register as exact route
             // Use CopyOnWriteArrayList for thread-safe iteration
-            exactRoutes.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>())
-                    .add(route);
+            CopyOnWriteArrayList<RouteDefinition> routes =
+                    exactRoutes.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>());
+            for (RouteDefinition existing : routes) {
+                if (equalsServerName(existing.getServerName(), route.getServerName())) {
+                    throw new IllegalStateException("Duplicate route registration: " + key
+                            + " (server=" + normalizeServerName(route.getServerName()) + ")");
+                }
+            }
+            routes.add(route);
             logger.debug("Registered exact route: {} -> {}", key, route.getMethod());
         }
     }
@@ -139,6 +155,21 @@ public class Router {
      */
     private boolean containsPathVariable(String path) {
         return path != null && path.contains("{");
+    }
+
+    private boolean equalsHttpMethod(String a, String b) {
+        if (a == null || a.isEmpty()) {
+            return b == null || b.isEmpty();
+        }
+        return a.equals(b);
+    }
+
+    private boolean equalsServerName(String a, String b) {
+        return normalizeServerName(a).equals(normalizeServerName(b));
+    }
+
+    private String normalizeServerName(String name) {
+        return (name == null || name.isEmpty()) ? "<default>" : name;
     }
 
     /**

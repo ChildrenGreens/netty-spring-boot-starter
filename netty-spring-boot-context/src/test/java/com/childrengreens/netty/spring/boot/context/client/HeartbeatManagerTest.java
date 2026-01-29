@@ -57,6 +57,8 @@ class HeartbeatManagerTest {
         heartbeatSpec.setIntervalMs(1000);
         heartbeatSpec.setTimeoutMs(500);
         heartbeatSpec.setMessage("{\"type\":\"heartbeat\"}");
+        heartbeatSpec.setRequestType("heartbeat");
+        heartbeatSpec.setResponseType("heartbeat");
         clientSpec.setHeartbeat(heartbeatSpec);
 
         connectionPool = mock(ConnectionPool.class);
@@ -214,6 +216,29 @@ class HeartbeatManagerTest {
         assertThat(heartbeatManager.getConsecutiveFailures()).isEqualTo(0);
 
         verify(connectionPool, atLeastOnce()).release(channel);
+        verify(requestInvoker, atLeastOnce()).invoke(eq(channel), eq("heartbeat"), any(), anyLong());
+
+        heartbeatManager.stop();
+        channel.close();
+    }
+
+    @Test
+    void sendHeartbeat_usesRequestTypeForMessageType() throws Exception {
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        clientSpec.getHeartbeat().setRequestType("ping");
+        clientSpec.getHeartbeat().setResponseType("pong");
+
+        CompletableFuture<Object> future = CompletableFuture.completedFuture("pong");
+        when(requestInvoker.invoke(any(Channel.class), anyString(), any(), anyLong())).thenReturn(future);
+
+        clientSpec.getHeartbeat().setIntervalMs(100);
+        heartbeatManager.start();
+
+        Thread.sleep(200);
+
+        verify(requestInvoker, atLeastOnce()).invoke(eq(channel), eq("ping"), any(), anyLong());
 
         heartbeatManager.stop();
         channel.close();
