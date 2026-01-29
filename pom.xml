@@ -225,6 +225,41 @@
                         </execution>
                     </executions>
                 </plugin>
+                <!-- License header plugin -->
+                <plugin>
+                    <groupId>com.mycila</groupId>
+                    <artifactId>license-maven-plugin</artifactId>
+                    <version>4.6</version>
+                    <configuration>
+                        <licenseSets>
+                            <licenseSet>
+                                <!-- Template location -->
+                                <header>build-tools/header.template</header>
+                                <properties>
+                                    <!-- Values to be substituted in template -->
+                                    <inceptionYear>2024</inceptionYear>
+                                    <currentYear>2025</currentYear>
+                                </properties>
+                                <includes>
+                                    <include>src/**/*.java</include>
+                                    <include>src/**/pom.xml</include>
+                                </includes>
+                            </licenseSet>
+                        </licenseSets>
+                        <mapping>
+                            <java>SLASHSTAR_STYLE</java>
+                        </mapping>
+                        <strictCheck>true</strictCheck>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>format</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
                 <!-- Flatten plugin for CI-friendly versions -->
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
@@ -254,6 +289,10 @@
             </plugins>
         </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>com.mycila</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+            </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>flatten-maven-plugin</artifactId>
