@@ -19,6 +19,7 @@ package com.childrengreens.netty.spring.boot.context.handler;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
+import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.buffer.ByteBuf;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -138,6 +140,31 @@ class DispatcherHandlerTest {
 
         ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"ping\"}", StandardCharsets.UTF_8);
         channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withByteBuf_releasesRetainedSlice() {
+        AtomicReference<InboundMessage> captured = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0, InboundMessage.class));
+                    return CompletableFuture.completedFuture(OutboundMessage.ok("ok"));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"ping\"}", StandardCharsets.UTF_8);
+        assertThat(buf.refCnt()).isEqualTo(1);
+
+        channel.writeInbound(buf);
+
+        InboundMessage inbound = captured.get();
+        assertThat(inbound).isNotNull();
+        assertThat(inbound.getRawPayloadBuffer()).isNotNull();
+        assertThat(inbound.getRawPayloadBuffer().refCnt()).isEqualTo(0);
+        assertThat(buf.refCnt()).isEqualTo(0);
 
         channel.close();
     }

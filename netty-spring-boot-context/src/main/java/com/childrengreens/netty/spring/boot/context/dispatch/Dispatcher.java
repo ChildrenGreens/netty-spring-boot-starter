@@ -23,6 +23,8 @@ import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
 import com.childrengreens.netty.spring.boot.context.routing.RouteDefinition;
 import com.childrengreens.netty.spring.boot.context.routing.Router;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,6 +152,18 @@ public class Dispatcher {
             if (codec != null) {
                 try {
                     return codec.decode(message.getRawPayload(), type);
+                } catch (Exception e) {
+                    logger.debug("Failed to decode payload to {}: {}", type, e.getMessage());
+                }
+            }
+        } else if (message.getRawPayloadBuffer() != null) {
+            NettyCodec codec = codecRegistry.getDefaultCodec();
+            if (codec != null) {
+                try {
+                    ByteBuf buf = message.getRawPayloadBuffer();
+                    byte[] bytes = ByteBufUtil.getBytes(
+                            buf, buf.readerIndex(), buf.readableBytes(), false);
+                    return codec.decode(bytes, type);
                 } catch (Exception e) {
                     logger.debug("Failed to decode payload to {}: {}", type, e.getMessage());
                 }

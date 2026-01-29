@@ -28,6 +28,7 @@ import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufInputStream;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -124,7 +125,8 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
                     logger.error("Error processing request", ex);
                     writeErrorResponse(ctx, msg, ex);
                     return null;
-                });
+                })
+                .whenComplete((outbound, ex) -> inbound.releaseRawPayloadBuffer());
     }
 
     /**
@@ -172,16 +174,14 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
      * Convert ByteBuf to InboundMessage (for TCP).
      */
     private InboundMessage convertByteBuf(ByteBuf buf) {
-        byte[] bytes = new byte[buf.readableBytes()];
-        buf.readBytes(bytes);
-
         // Try to extract type from JSON for MESSAGE_TYPE routing
-        String routeKey = extractTypeFromJson(bytes);
+        ByteBuf retained = buf.retainedSlice();
+        String routeKey = extractTypeFromJson(retained);
 
         return InboundMessage.builder()
                 .transport(TransportType.TCP)
                 .routeKey(routeKey)
-                .rawPayload(bytes)
+                .rawPayload(retained)
                 .build();
     }
 
@@ -197,21 +197,22 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     }
 
     /**
-     * Extract route key field from JSON bytes using Jackson.
+     * Extract route key field from JSON ByteBuf using Jackson.
      *
      * <p>This method safely parses JSON and looks for common route key fields
-     * such as "type", "cmd", "action", or "command".
+     * such as "type", "cmd", "action", or "command". It uses {@link ByteBufInputStream}
+     * with {@link ByteBuf#duplicate()} for zero-copy JSON parsing.
      *
-     * @param bytes the JSON bytes
+     * @param buf the JSON ByteBuf
      * @return the extracted route key, or {@link #DEFAULT_ROUTE_KEY} if not found
      */
-    private String extractTypeFromJson(byte[] bytes) {
-        if (bytes == null || bytes.length == 0) {
+    private String extractTypeFromJson(ByteBuf buf) {
+        if (buf == null || !buf.isReadable()) {
             return DEFAULT_ROUTE_KEY;
         }
 
         try {
-            JsonNode rootNode = objectMapper.readTree(bytes);
+            JsonNode rootNode = objectMapper.readTree(new ByteBufInputStream(buf.duplicate()));
 
             if (rootNode == null || !rootNode.isObject()) {
                 return DEFAULT_ROUTE_KEY;

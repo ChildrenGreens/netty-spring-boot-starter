@@ -17,6 +17,8 @@
 package com.childrengreens.netty.spring.boot.context.message;
 
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
+import io.netty.buffer.ByteBuf;
+import io.netty.util.ReferenceCountUtil;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -60,6 +62,11 @@ public class InboundMessage {
     private final byte[] rawPayload;
 
     /**
+     * The raw payload buffer for zero-copy processing.
+     */
+    private final ByteBuf rawPayloadBuffer;
+
+    /**
      * Create a new InboundMessage.
      * @param transport the transport type
      * @param routeKey the route key for matching
@@ -68,7 +75,7 @@ public class InboundMessage {
      */
     public InboundMessage(TransportType transport, String routeKey,
                           Map<String, Object> headers, Object payload) {
-        this(transport, routeKey, headers, payload, null);
+        this(transport, routeKey, headers, payload, null, null);
     }
 
     /**
@@ -81,11 +88,31 @@ public class InboundMessage {
      */
     public InboundMessage(TransportType transport, String routeKey,
                           Map<String, Object> headers, Object payload, byte[] rawPayload) {
+        this(transport, routeKey, headers, payload, rawPayload, null);
+    }
+
+    /**
+     * Create a new InboundMessage with raw payload buffer.
+     * @param transport the transport type
+     * @param routeKey the route key for matching
+     * @param headers message headers
+     * @param payload the decoded payload
+     * @param rawPayloadBuffer the raw payload buffer
+     */
+    public InboundMessage(TransportType transport, String routeKey,
+                          Map<String, Object> headers, Object payload, ByteBuf rawPayloadBuffer) {
+        this(transport, routeKey, headers, payload, null, rawPayloadBuffer);
+    }
+
+    private InboundMessage(TransportType transport, String routeKey,
+                           Map<String, Object> headers, Object payload,
+                           byte[] rawPayload, ByteBuf rawPayloadBuffer) {
         this.transport = transport;
         this.routeKey = routeKey;
         this.headers = headers != null ? headers : new HashMap<>();
         this.payload = payload;
         this.rawPayload = rawPayload;
+        this.rawPayloadBuffer = rawPayloadBuffer;
     }
 
     /**
@@ -151,6 +178,23 @@ public class InboundMessage {
     }
 
     /**
+     * Return the raw payload buffer.
+     * @return the raw payload buffer, or {@code null} if not available
+     */
+    public ByteBuf getRawPayloadBuffer() {
+        return this.rawPayloadBuffer;
+    }
+
+    /**
+     * Release the raw payload buffer if present.
+     */
+    public void releaseRawPayloadBuffer() {
+        if (this.rawPayloadBuffer != null) {
+            ReferenceCountUtil.release(this.rawPayloadBuffer);
+        }
+    }
+
+    /**
      * Create a builder for constructing InboundMessage instances.
      * @return a new builder
      */
@@ -168,6 +212,7 @@ public class InboundMessage {
         private Map<String, Object> headers = new HashMap<>();
         private Object payload;
         private byte[] rawPayload;
+        private ByteBuf rawPayloadBuffer;
 
         /**
          * Set the transport type.
@@ -231,10 +276,23 @@ public class InboundMessage {
         }
 
         /**
+         * Set the raw payload buffer.
+         * @param rawPayloadBuffer the raw payload buffer
+         * @return this builder
+         */
+        public Builder rawPayload(ByteBuf rawPayloadBuffer) {
+            this.rawPayloadBuffer = rawPayloadBuffer;
+            return this;
+        }
+
+        /**
          * Build the InboundMessage.
          * @return the constructed message
          */
         public InboundMessage build() {
+            if (rawPayloadBuffer != null) {
+                return new InboundMessage(transport, routeKey, headers, payload, rawPayloadBuffer);
+            }
             return new InboundMessage(transport, routeKey, headers, payload, rawPayload);
         }
 
