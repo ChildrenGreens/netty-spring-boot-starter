@@ -16,6 +16,9 @@
 
 package com.childrengreens.netty.spring.boot.context.server;
 
+import com.childrengreens.netty.spring.boot.context.event.NettyEvent;
+import com.childrengreens.netty.spring.boot.context.event.NettyServerStartedEvent;
+import com.childrengreens.netty.spring.boot.context.event.NettyServerStoppedEvent;
 import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.properties.*;
 import com.childrengreens.netty.spring.boot.context.transport.TransportFactory;
@@ -27,6 +30,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.ApplicationEventPublisherAware;
+import org.springframework.lang.NonNull;
 
 import java.util.Collections;
 import java.util.Map;
@@ -41,6 +47,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <li>Creating and starting server instances</li>
  * <li>Managing server lifecycle (start, stop)</li>
  * <li>Handling graceful shutdown</li>
+ * <li>Publishing lifecycle events ({@link NettyServerStartedEvent}, {@link NettyServerStoppedEvent})</li>
  * </ul>
  *
  * @author Netty Spring Boot
@@ -48,7 +55,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @see ServerRuntime
  * @see NettyProperties
  */
-public class NettyServerOrchestrator implements InitializingBean, DisposableBean {
+public class NettyServerOrchestrator implements InitializingBean, DisposableBean, ApplicationEventPublisherAware {
 
     private static final Logger logger = LoggerFactory.getLogger(NettyServerOrchestrator.class);
 
@@ -57,6 +64,7 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
     private final PipelineAssembler pipelineAssembler;
     private final Map<String, ServerRuntime> runtimes = new ConcurrentHashMap<>();
 
+    private ApplicationEventPublisher eventPublisher;
     private boolean failFast = true;
 
     /**
@@ -70,6 +78,11 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
         this.properties = properties;
         this.transportFactory = transportFactory;
         this.pipelineAssembler = pipelineAssembler;
+    }
+
+    @Override
+    public void setApplicationEventPublisher(@NonNull ApplicationEventPublisher applicationEventPublisher) {
+        this.eventPublisher = applicationEventPublisher;
     }
 
     @Override
@@ -112,8 +125,10 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
         logger.info("Stopping {} Netty server(s)...", runtimes.size());
 
         ShutdownSpec shutdown = properties.getDefaults().getShutdown();
-        for (ServerRuntime runtime : runtimes.values()) {
-            runtime.stop(shutdown);
+        for (Map.Entry<String, ServerRuntime> entry : runtimes.entrySet()) {
+            entry.getValue().stop(shutdown);
+            // Publish server stopped event
+            publishEvent(new NettyServerStoppedEvent(this, entry.getKey()));
         }
 
         runtimes.clear();
@@ -150,6 +165,10 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
             ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer);
 
             runtimes.put(spec.getName(), runtime);
+
+            // Publish server started event
+            publishEvent(new NettyServerStartedEvent(this, spec.getName(),
+                    spec.getHost(), spec.getPort(), spec.getProfile()));
         } catch (Exception e) {
             // Shutdown event loop groups on failure to prevent resource leak
             bossGroup.shutdownGracefully();
@@ -199,6 +218,16 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
      */
     public void setFailFast(boolean failFast) {
         this.failFast = failFast;
+    }
+
+    /**
+     * Publish an event if the event publisher is available.
+     * @param event the event to publish
+     */
+    private void publishEvent(NettyEvent event) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(event);
+        }
     }
 
 }

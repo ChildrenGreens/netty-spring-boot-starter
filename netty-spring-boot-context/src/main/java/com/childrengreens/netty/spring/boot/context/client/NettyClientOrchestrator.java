@@ -18,6 +18,9 @@ package com.childrengreens.netty.spring.boot.context.client;
 
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
+import com.childrengreens.netty.spring.boot.context.event.NettyClientConnectedEvent;
+import com.childrengreens.netty.spring.boot.context.event.NettyClientDisconnectedEvent;
+import com.childrengreens.netty.spring.boot.context.event.NettyEvent;
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import com.childrengreens.netty.spring.boot.context.properties.DefaultsSpec;
 import com.childrengreens.netty.spring.boot.context.properties.NettyProperties;
@@ -32,6 +35,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.ApplicationEventPublisherAware;
+import org.springframework.lang.NonNull;
 
 import java.util.Collections;
 import java.util.Map;
@@ -49,6 +55,7 @@ import java.util.concurrent.TimeUnit;
  * <li>Creating and initializing client instances</li>
  * <li>Managing client lifecycle (start, stop)</li>
  * <li>Handling graceful shutdown</li>
+ * <li>Publishing lifecycle events ({@link NettyClientConnectedEvent}, {@link NettyClientDisconnectedEvent})</li>
  * </ul>
  *
  * @author Netty Spring Boot
@@ -56,7 +63,7 @@ import java.util.concurrent.TimeUnit;
  * @see ClientRuntime
  * @see NettyProperties
  */
-public class NettyClientOrchestrator implements InitializingBean, DisposableBean {
+public class NettyClientOrchestrator implements InitializingBean, DisposableBean, ApplicationEventPublisherAware {
 
     private static final Logger logger = LoggerFactory.getLogger(NettyClientOrchestrator.class);
 
@@ -66,6 +73,7 @@ public class NettyClientOrchestrator implements InitializingBean, DisposableBean
     private final CodecRegistry codecRegistry;
     private final Map<String, ClientRuntime> runtimes = new ConcurrentHashMap<>();
 
+    private ApplicationEventPublisher eventPublisher;
     private ScheduledExecutorService scheduledExecutor;
     private boolean failFast = true;
 
@@ -82,6 +90,11 @@ public class NettyClientOrchestrator implements InitializingBean, DisposableBean
         this.transportFactory = transportFactory;
         this.pipelineAssembler = pipelineAssembler;
         this.codecRegistry = codecRegistry;
+    }
+
+    @Override
+    public void setApplicationEventPublisher(@NonNull ApplicationEventPublisher applicationEventPublisher) {
+        this.eventPublisher = applicationEventPublisher;
     }
 
     @Override
@@ -211,6 +224,10 @@ public class NettyClientOrchestrator implements InitializingBean, DisposableBean
         }
 
         runtimes.put(spec.getName(), runtime);
+
+        // Publish client connected event
+        publishEvent(new NettyClientConnectedEvent(this, spec.getName(), spec.getHost(), spec.getPort()));
+
         logger.info("Client [{}] started successfully", spec.getName());
     }
 
@@ -248,6 +265,12 @@ public class NettyClientOrchestrator implements InitializingBean, DisposableBean
         }
 
         runtime.setState(ClientRuntime.ClientState.STOPPED);
+
+        // Publish client disconnected event
+        ClientSpec spec = runtime.getClientSpec();
+        publishEvent(new NettyClientDisconnectedEvent(this, runtime.getName(),
+                spec.getHost(), spec.getPort(), null));
+
         logger.info("Client [{}] stopped", runtime.getName());
     }
 
@@ -291,6 +314,16 @@ public class NettyClientOrchestrator implements InitializingBean, DisposableBean
      */
     public void setFailFast(boolean failFast) {
         this.failFast = failFast;
+    }
+
+    /**
+     * Publish an event if the event publisher is available.
+     * @param event the event to publish
+     */
+    private void publishEvent(NettyEvent event) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(event);
+        }
     }
 
 }

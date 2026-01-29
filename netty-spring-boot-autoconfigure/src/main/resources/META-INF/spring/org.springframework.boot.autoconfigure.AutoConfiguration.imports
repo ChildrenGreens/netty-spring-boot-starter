@@ -1,1 +1,3 @@
 com.childrengreens.netty.spring.boot.autoconfigure.config.NettyAutoConfiguration
+com.childrengreens.netty.spring.boot.autoconfigure.config.NettyServerAutoConfiguration
+com.childrengreens.netty.spring.boot.autoconfigure.config.NettyClientAutoConfiguration

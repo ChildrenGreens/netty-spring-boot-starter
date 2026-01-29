@@ -10,6 +10,24 @@ netty-spring-boot/
 └── netty-spring-boot-starter/        # Starter dependency aggregation
 ```
 
+## Auto-Configuration Structure
+
+The auto-configuration is split into three independent classes for better modularity:
+
+| Configuration Class | Responsibility | Condition |
+|---------------------|----------------|-----------|
+| `NettyAutoConfiguration` | Shared beans (CodecRegistry, TransportFactory) | `spring.netty.enabled=true` (default) |
+| `NettyServerAutoConfiguration` | Server beans (Router, Dispatcher, ProfileRegistry, FeatureRegistry, PipelineAssembler, NettyServerOrchestrator, AnnotationRegistry) | `spring.netty.server.enabled=true` (default) + CodecRegistry exists |
+| `NettyClientAutoConfiguration` | Client beans (ClientProfileRegistry, ClientPipelineAssembler, NettyClientOrchestrator, ClientProxyFactory) | `spring.netty.client.enabled=true` (default) + CodecRegistry exists |
+
+### Configuration Properties
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `spring.netty.enabled` | `true` | Enable/disable all Netty functionality |
+| `spring.netty.server.enabled` | `true` | Enable/disable server components only |
+| `spring.netty.client.enabled` | `true` | Enable/disable client components only |
+
 ## Architecture Overview
 
 ```

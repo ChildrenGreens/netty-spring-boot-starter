@@ -16,6 +16,10 @@
 
 package com.childrengreens.netty.spring.boot.autoconfigure.config;
 
+import com.childrengreens.netty.spring.boot.context.client.ClientPipelineAssembler;
+import com.childrengreens.netty.spring.boot.context.client.ClientProfileRegistry;
+import com.childrengreens.netty.spring.boot.context.client.ClientProxyFactory;
+import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrator;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
@@ -38,7 +42,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NettyAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(NettyAutoConfiguration.class));
+            .withConfiguration(AutoConfigurations.of(
+                    NettyAutoConfiguration.class,
+                    NettyServerAutoConfiguration.class,
+                    NettyClientAutoConfiguration.class));
 
     @Test
     void autoConfiguration_createsNettyProperties() {
@@ -129,5 +136,59 @@ class NettyAutoConfigurationTest {
     void autoConfiguration_notLoadedWithoutNettyOnClasspath() {
         new ApplicationContextRunner()
                 .run(context -> assertThat(context).doesNotHaveBean(NettyAutoConfiguration.class));
+    }
+
+    // ==================== Server Configuration Tests ====================
+
+    @Test
+    void serverAutoConfiguration_disabledWhenPropertySetToFalse() {
+        this.contextRunner
+                .withPropertyValues("spring.netty.server.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(NettyServerOrchestrator.class);
+                    assertThat(context).doesNotHaveBean(ProfileRegistry.class);
+                    assertThat(context).doesNotHaveBean(Router.class);
+                    // Client beans should still be present
+                    assertThat(context).hasSingleBean(NettyClientOrchestrator.class);
+                });
+    }
+
+    // ==================== Client Configuration Tests ====================
+
+    @Test
+    void clientAutoConfiguration_createsClientProfileRegistry() {
+        this.contextRunner.run(context -> {
+            assertThat(context).hasSingleBean(ClientProfileRegistry.class);
+            ClientProfileRegistry registry = context.getBean(ClientProfileRegistry.class);
+            assertThat(registry.hasProfile("tcp-lengthfield-json")).isTrue();
+        });
+    }
+
+    @Test
+    void clientAutoConfiguration_createsClientPipelineAssembler() {
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(ClientPipelineAssembler.class));
+    }
+
+    @Test
+    void clientAutoConfiguration_createsNettyClientOrchestrator() {
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(NettyClientOrchestrator.class));
+    }
+
+    @Test
+    void clientAutoConfiguration_createsClientProxyFactory() {
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(ClientProxyFactory.class));
+    }
+
+    @Test
+    void clientAutoConfiguration_disabledWhenPropertySetToFalse() {
+        this.contextRunner
+                .withPropertyValues("spring.netty.client.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(NettyClientOrchestrator.class);
+                    assertThat(context).doesNotHaveBean(ClientProfileRegistry.class);
+                    assertThat(context).doesNotHaveBean(ClientProxyFactory.class);
+                    // Server beans should still be present
+                    assertThat(context).hasSingleBean(NettyServerOrchestrator.class);
+                });
     }
 }

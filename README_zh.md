@@ -75,9 +75,27 @@ netty-spring-boot/
 ├── netty-spring-boot-context/        # 核心 API、注解、接口（服务端 + 客户端）
 ├── netty-spring-boot-actuator/       # 监控指标、健康检查、端点
 ├── netty-spring-boot-autoconfigure/  # 自动配置（服务端 + 客户端）
-├── netty-spring-boot-starter/        # Starter 依赖聚合
-└── samples/                          # 示例应用
-    └── sample-tcp-json/
+└── netty-spring-boot-starter/        # Starter 依赖聚合
+```
+
+## 启用/禁用配置
+
+自动配置是模块化的 - 你可以独立启用/禁用各个组件：
+
+| 属性 | 默认值 | 说明 |
+|------|--------|------|
+| `spring.netty.enabled` | `true` | 启用/禁用所有 Netty 功能 |
+| `spring.netty.server.enabled` | `true` | 仅启用/禁用服务端组件 |
+| `spring.netty.client.enabled` | `true` | 仅启用/禁用客户端组件 |
+
+**示例 - 仅客户端模式：**
+```yaml
+spring:
+  netty:
+    server:
+      enabled: false    # 禁用服务端
+    client:
+      enabled: true     # 启用客户端（默认）
 ```
 
 ## 快速开始

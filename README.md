@@ -75,9 +75,27 @@ netty-spring-boot/
 ├── netty-spring-boot-context/        # Core APIs, annotations, interfaces (Server + Client)
 ├── netty-spring-boot-actuator/       # Metrics, health checks, endpoints
 ├── netty-spring-boot-autoconfigure/  # Auto-configuration (Server + Client)
-├── netty-spring-boot-starter/        # Starter dependency aggregation
-└── samples/                          # Example applications
-    └── sample-tcp-json/
+└── netty-spring-boot-starter/        # Starter dependency aggregation
+```
+
+## Enable/Disable Configuration
+
+The auto-configuration is modular - you can enable/disable components independently:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `spring.netty.enabled` | `true` | Enable/disable all Netty functionality |
+| `spring.netty.server.enabled` | `true` | Enable/disable server components only |
+| `spring.netty.client.enabled` | `true` | Enable/disable client components only |
+
+**Example - Client only mode:**
+```yaml
+spring:
+  netty:
+    server:
+      enabled: false    # Disable server
+    client:
+      enabled: true     # Enable client (default)
 ```
 
 ## Quick Start
