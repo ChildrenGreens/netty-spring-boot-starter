@@ -19,6 +19,7 @@ package com.childrengreens.netty.spring.boot.context.handler;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
@@ -76,7 +77,11 @@ public class ExceptionHandler extends ChannelDuplexHandler {
 
         // Determine if connection should be closed
         if (shouldCloseConnection(cause, protocolType)) {
-            ctx.close();
+            // For HTTP/WS responses, close after flush in sendErrorResponse
+            if (!NettyContext.PROTOCOL_HTTP.equals(protocolType)
+                    && !NettyContext.PROTOCOL_WEBSOCKET.equals(protocolType)) {
+                ctx.close();
+            }
         }
     }
 
@@ -134,7 +139,7 @@ public class ExceptionHandler extends ChannelDuplexHandler {
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.length);
 
-        ctx.writeAndFlush(response);
+        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
     }
 
     /**
@@ -146,7 +151,8 @@ public class ExceptionHandler extends ChannelDuplexHandler {
             // WebSocket close reason is limited to 123 bytes
             reason = "Internal error";
         }
-        ctx.writeAndFlush(new CloseWebSocketFrame(1011, reason));
+        ctx.writeAndFlush(new CloseWebSocketFrame(1011, reason))
+                .addListener(ChannelFutureListener.CLOSE);
     }
 
     /**

@@ -26,7 +26,6 @@ import com.childrengreens.netty.spring.boot.context.handler.ExceptionHandler;
 import com.childrengreens.netty.spring.boot.context.profile.Profile;
 import com.childrengreens.netty.spring.boot.context.profile.ProfileRegistry;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
-import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import io.netty.channel.ChannelPipeline;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,7 +99,7 @@ public class PipelineAssembler {
                 serverSpec.getName(), profileName);
 
         // 0. Set protocol type attribute for ExceptionHandler
-        String protocolType = resolveProtocolType(serverSpec, profileName);
+        String protocolType = profile.getProtocolType();
         pipeline.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).set(protocolType);
 
         // 1. Apply features with low order numbers (SSL, connection governance)
@@ -129,33 +128,6 @@ public class PipelineAssembler {
         }
 
         logger.debug("Pipeline assembled with handlers: {}", pipeline.names());
-    }
-
-    /**
-     * Resolve the protocol type based on transport and profile.
-     * @param serverSpec the server specification
-     * @param profileName the profile name
-     * @return the protocol type constant
-     */
-    private String resolveProtocolType(ServerSpec serverSpec, String profileName) {
-        TransportType transport = serverSpec.getTransport();
-
-        // Check transport type first
-        if (transport == TransportType.UDP) {
-            return NettyContext.PROTOCOL_UDP;
-        }
-
-        // Check profile name for HTTP/WebSocket
-        String lowerProfile = profileName.toLowerCase();
-        if (lowerProfile.contains("websocket") || lowerProfile.contains("ws")) {
-            return NettyContext.PROTOCOL_WEBSOCKET;
-        }
-        if (lowerProfile.contains("http")) {
-            return NettyContext.PROTOCOL_HTTP;
-        }
-
-        // Default to TCP for other profiles
-        return NettyContext.PROTOCOL_TCP;
     }
 
     /**

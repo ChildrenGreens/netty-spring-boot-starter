@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.profile;
 
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
 
@@ -44,6 +45,11 @@ public class UdpJsonProfile implements Profile {
     public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
         // UDP doesn't need framing - each datagram is a complete message
         // JSON codec will be added by the pipeline assembler
+    }
+
+    @Override
+    public String getProtocolType() {
+        return NettyContext.PROTOCOL_UDP;
     }
 
 }

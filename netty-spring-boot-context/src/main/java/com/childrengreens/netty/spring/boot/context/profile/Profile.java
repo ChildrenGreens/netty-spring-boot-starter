@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.profile;
 
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
 
@@ -61,6 +62,20 @@ public interface Profile {
      */
     default boolean supportsDispatcher() {
         return true;
+    }
+
+    /**
+     * Return the protocol type for this profile.
+     * <p>Used by {@link com.childrengreens.netty.spring.boot.context.handler.ExceptionHandler}
+     * to determine the appropriate error response format.
+     * @return the protocol type constant from {@link NettyContext}
+     * @see NettyContext#PROTOCOL_HTTP
+     * @see NettyContext#PROTOCOL_WEBSOCKET
+     * @see NettyContext#PROTOCOL_TCP
+     * @see NettyContext#PROTOCOL_UDP
+     */
+    default String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
     }
 
 }

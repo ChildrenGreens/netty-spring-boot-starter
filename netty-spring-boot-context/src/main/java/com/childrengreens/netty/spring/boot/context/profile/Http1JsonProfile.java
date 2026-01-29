@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.profile;
 
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.HttpObjectAggregator;
@@ -55,6 +56,11 @@ public class Http1JsonProfile implements Profile {
 
         // Aggregator to combine HttpMessage and HttpContent
         pipeline.addLast("httpAggregator", new HttpObjectAggregator(MAX_CONTENT_LENGTH));
+    }
+
+    @Override
+    public String getProtocolType() {
+        return NettyContext.PROTOCOL_HTTP;
     }
 
 }

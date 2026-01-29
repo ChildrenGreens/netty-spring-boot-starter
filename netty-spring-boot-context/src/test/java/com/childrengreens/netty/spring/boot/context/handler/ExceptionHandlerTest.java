@@ -20,13 +20,16 @@ import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.Attribute;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -38,30 +41,103 @@ class ExceptionHandlerTest {
     private ExceptionHandler handler;
     private ChannelHandlerContext ctx;
     private Channel channel;
+    private ChannelFuture channelFuture;
 
     @BeforeEach
     void setUp() {
         handler = new ExceptionHandler();
         ctx = mock(ChannelHandlerContext.class);
         channel = mock(Channel.class);
+        channelFuture = mock(ChannelFuture.class);
         when(ctx.channel()).thenReturn(channel);
+        when(ctx.writeAndFlush(any())).thenReturn(channelFuture);
+        when(channelFuture.addListener(any())).thenReturn(channelFuture);
         // Default: no protocol type attribute set
         when(channel.hasAttr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(false);
     }
 
     @Test
-    void exceptionCaught_withHttpProtocol_sendsHttpErrorResponseAndCloses() {
+    void exceptionCaught_withHttpProtocol_sendsHttpErrorResponseWithCloseListener() {
         // Set up HTTP protocol
         setupProtocolType(NettyContext.PROTOCOL_HTTP);
         when(channel.isActive()).thenReturn(true);
         when(ctx.alloc()).thenReturn(io.netty.buffer.UnpooledByteBufAllocator.DEFAULT);
-        ChannelFuture future = mock(ChannelFuture.class);
-        when(ctx.writeAndFlush(any())).thenReturn(future);
 
         handler.exceptionCaught(ctx, new RuntimeException("Test error"));
 
+        // Verify HTTP response sent with close listener
         verify(ctx).writeAndFlush(any());
-        verify(ctx).close();
+        verify(channelFuture).addListener(any());
+        // ctx.close() should NOT be called directly for HTTP - close is via listener
+        verify(ctx, never()).close();
+    }
+
+    @Test
+    void exceptionCaught_withWebSocketProtocol_sendsCloseFrameWithCloseListener() {
+        // Set up WebSocket protocol
+        setupProtocolType(NettyContext.PROTOCOL_WEBSOCKET);
+        when(channel.isActive()).thenReturn(true);
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // Verify CloseWebSocketFrame sent
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(ctx).writeAndFlush(captor.capture());
+        assertTrue(captor.getValue() instanceof CloseWebSocketFrame);
+
+        // Verify close listener added
+        verify(channelFuture).addListener(any());
+
+        // ctx.close() should NOT be called directly for WebSocket - close is via listener
+        verify(ctx, never()).close();
+    }
+
+    @Test
+    void exceptionCaught_withWebSocketProtocol_sendsCloseFrameWithStatusCode1011() {
+        // Set up WebSocket protocol
+        setupProtocolType(NettyContext.PROTOCOL_WEBSOCKET);
+        when(channel.isActive()).thenReturn(true);
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // Verify CloseWebSocketFrame with correct status code (1011 = Internal Error)
+        ArgumentCaptor<CloseWebSocketFrame> captor = ArgumentCaptor.forClass(CloseWebSocketFrame.class);
+        verify(ctx).writeAndFlush(captor.capture());
+        CloseWebSocketFrame frame = captor.getValue();
+        assertEquals(1011, frame.statusCode());
+    }
+
+    @Test
+    void exceptionCaught_withWebSocketProtocol_truncatesLongReasonText() {
+        // Set up WebSocket protocol
+        setupProtocolType(NettyContext.PROTOCOL_WEBSOCKET);
+        when(channel.isActive()).thenReturn(true);
+
+        // Create exception with message longer than 123 bytes
+        String longMessage = "A".repeat(200);
+        handler.exceptionCaught(ctx, new RuntimeException(longMessage));
+
+        // Verify CloseWebSocketFrame reason is truncated
+        ArgumentCaptor<CloseWebSocketFrame> captor = ArgumentCaptor.forClass(CloseWebSocketFrame.class);
+        verify(ctx).writeAndFlush(captor.capture());
+        CloseWebSocketFrame frame = captor.getValue();
+        assertEquals("Internal error", frame.reasonText());
+    }
+
+    @Test
+    void exceptionCaught_withWebSocketProtocol_handlesNullMessage() {
+        // Set up WebSocket protocol
+        setupProtocolType(NettyContext.PROTOCOL_WEBSOCKET);
+        when(channel.isActive()).thenReturn(true);
+
+        // Create exception with null message
+        handler.exceptionCaught(ctx, new RuntimeException((String) null));
+
+        // Verify CloseWebSocketFrame with default reason
+        ArgumentCaptor<CloseWebSocketFrame> captor = ArgumentCaptor.forClass(CloseWebSocketFrame.class);
+        verify(ctx).writeAndFlush(captor.capture());
+        CloseWebSocketFrame frame = captor.getValue();
+        assertEquals("Internal error", frame.reasonText());
     }
 
     @Test
@@ -75,6 +151,20 @@ class ExceptionHandlerTest {
         // TCP doesn't send error response by default
         verify(ctx, never()).writeAndFlush(any());
         // TCP doesn't close for recoverable errors
+        verify(ctx, never()).close();
+    }
+
+    @Test
+    void exceptionCaught_withUdpProtocol_doesNotSendResponseOrClose() {
+        // UDP protocol - no response, no close (UDP is connectionless)
+        setupProtocolType(NettyContext.PROTOCOL_UDP);
+        when(channel.isActive()).thenReturn(true);
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // UDP doesn't send error response
+        verify(ctx, never()).writeAndFlush(any());
+        // UDP doesn't close for recoverable errors
         verify(ctx, never()).close();
     }
 
@@ -116,8 +206,21 @@ class ExceptionHandlerTest {
         // Should not throw exception
         handler.exceptionCaught(ctx, new RuntimeException("Test error"));
 
-        // Should still try to close for HTTP
-        verify(ctx).close();
+        // Write failed, but no explicit close for HTTP (would happen via listener)
+        verify(ctx, never()).close();
+    }
+
+    @Test
+    void exceptionCaught_withWebSocketProtocol_whenWriteFails_handlesGracefully() {
+        setupProtocolType(NettyContext.PROTOCOL_WEBSOCKET);
+        when(channel.isActive()).thenReturn(true);
+        when(ctx.writeAndFlush(any())).thenThrow(new RuntimeException("Write failed"));
+
+        // Should not throw exception
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // Write failed, but no explicit close for WebSocket (would happen via listener)
+        verify(ctx, never()).close();
     }
 
     private void setupProtocolType(String protocolType) {
