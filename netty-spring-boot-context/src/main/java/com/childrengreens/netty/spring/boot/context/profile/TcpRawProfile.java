@@ -25,7 +25,7 @@ import io.netty.channel.ChannelPipeline;
  * <p>This profile provides no automatic frame decoding. The user is responsible
  * for handling ByteBuf directly or configuring custom codecs.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class TcpRawProfile implements Profile {

@@ -22,7 +22,7 @@ package com.childrengreens.netty.spring.boot.context.codec;
  * <p>Implementations provide serialization/deserialization support
  * for various formats such as JSON, Protobuf, or custom binary protocols.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see JsonNettyCodec
  * @see CodecRegistry

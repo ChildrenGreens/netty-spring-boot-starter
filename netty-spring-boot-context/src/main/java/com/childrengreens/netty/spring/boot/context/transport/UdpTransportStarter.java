@@ -33,7 +33,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Transport starter for UDP-based servers.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class UdpTransportStarter implements TransportStarter {

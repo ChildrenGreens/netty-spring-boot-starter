@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>This manager sends periodic heartbeat messages to keep connections alive
  * and detect dead connections.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientSpec
  * @see HeartbeatSpec

@@ -46,7 +46,7 @@ import org.springframework.context.annotation.Bean;
  * <p>This configuration is activated when {@code spring.netty.client.enabled}
  * is not explicitly set to {@code false}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyServerAutoConfiguration
  */

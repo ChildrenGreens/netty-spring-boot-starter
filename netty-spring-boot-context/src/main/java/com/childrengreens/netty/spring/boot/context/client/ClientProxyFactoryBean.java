@@ -28,7 +28,7 @@ import org.springframework.context.ApplicationContextAware;
  * using the {@link ClientProxyFactory}.
  *
  * @param <T> the client interface type
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientProxyFactory
  */

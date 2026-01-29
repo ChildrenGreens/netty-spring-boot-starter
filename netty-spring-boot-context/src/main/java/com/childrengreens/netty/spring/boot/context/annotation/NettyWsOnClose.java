@@ -28,7 +28,7 @@ import java.lang.annotation.Target;
  * <p>Methods annotated with this annotation are invoked when a WebSocket
  * connection is closed.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyController
  * @see NettyWsOnOpen

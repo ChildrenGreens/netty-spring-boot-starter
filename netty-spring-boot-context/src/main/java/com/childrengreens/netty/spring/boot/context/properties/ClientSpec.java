@@ -36,7 +36,7 @@ import org.springframework.boot.context.properties.NestedConfigurationProperty;
  *     enabled: true
  * }</pre>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see PoolSpec
  * @see ReconnectSpec

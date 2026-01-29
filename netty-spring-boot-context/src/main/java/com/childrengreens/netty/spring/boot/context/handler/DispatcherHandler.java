@@ -46,7 +46,7 @@ import java.util.Map;
  * <p>This handler converts incoming data to {@link InboundMessage} instances
  * and delegates to the {@link Dispatcher} for routing and invocation.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {

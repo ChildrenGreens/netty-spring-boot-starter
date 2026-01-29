@@ -26,7 +26,7 @@ import io.netty.channel.EventLoopGroup;
  * <p>This class holds the runtime state of a client, including its
  * bootstrap, event loop group, connection pool, and managers.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class ClientRuntime {

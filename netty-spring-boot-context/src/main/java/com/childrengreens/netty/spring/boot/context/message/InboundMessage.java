@@ -27,7 +27,7 @@ import java.util.Map;
  * <p>This abstraction allows the router and dispatcher to work uniformly
  * across different protocols (TCP, UDP, HTTP, WebSocket).
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see OutboundMessage
  */

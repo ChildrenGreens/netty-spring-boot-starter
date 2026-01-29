@@ -35,7 +35,7 @@ import java.lang.annotation.Target;
  * <p>Typically used in combination with {@link NettyMessageMapping @NettyMessageMapping}
  * annotated handler methods.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyMessageMapping
  */

@@ -26,7 +26,7 @@ import io.netty.channel.ChannelPipeline;
  * independently of the profile. Examples include idle detection, SSL/TLS,
  * logging, rate limiting, and connection limiting.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see FeatureRegistry
  */

@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Encapsulates the server's event loop groups, bind channel, and state.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class ServerRuntime {

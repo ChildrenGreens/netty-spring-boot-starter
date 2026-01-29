@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * Argument resolver for query parameters annotated with {@link Query}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class QueryArgumentResolver implements ArgumentResolver {

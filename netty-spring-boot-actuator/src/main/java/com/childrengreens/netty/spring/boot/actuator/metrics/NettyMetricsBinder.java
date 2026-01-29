@@ -39,7 +39,7 @@ import java.util.Map;
  * <li>{@code netty.bytes.sent} - Total bytes sent</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class NettyMetricsBinder implements MeterBinder {

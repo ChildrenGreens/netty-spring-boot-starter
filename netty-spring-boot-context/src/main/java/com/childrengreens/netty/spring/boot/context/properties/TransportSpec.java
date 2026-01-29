@@ -19,7 +19,7 @@ package com.childrengreens.netty.spring.boot.context.properties;
 /**
  * Transport implementation preference configuration.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see TransportImpl
  */

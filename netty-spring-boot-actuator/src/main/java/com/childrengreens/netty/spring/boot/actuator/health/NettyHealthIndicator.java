@@ -35,7 +35,7 @@ import java.util.Map;
  * <li>Transport type</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class NettyHealthIndicator implements HealthIndicator {

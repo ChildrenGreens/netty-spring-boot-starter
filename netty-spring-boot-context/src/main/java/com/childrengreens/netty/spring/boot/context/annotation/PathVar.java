@@ -28,7 +28,7 @@ import java.lang.annotation.Target;
  * <p>For example, a path pattern like {@code "/user/{id}"} can be mapped
  * with a method parameter annotated with {@code @PathVar("id")}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyHttpGet
  * @see NettyHttpPost

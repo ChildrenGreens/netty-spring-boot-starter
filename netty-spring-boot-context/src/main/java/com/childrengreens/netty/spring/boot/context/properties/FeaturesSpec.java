@@ -24,7 +24,7 @@ import org.springframework.boot.context.properties.NestedConfigurationProperty;
  * <p>Features are composable handler suites that can be enabled/disabled
  * and configured for each server instance.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class FeaturesSpec {

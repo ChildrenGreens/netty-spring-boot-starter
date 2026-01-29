@@ -41,7 +41,7 @@ import java.util.List;
  *         profile: tcp-lengthfield-json
  * }</pre>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ServerSpec
  * @see DefaultsSpec

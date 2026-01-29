@@ -33,7 +33,7 @@ import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrat
  * }
  * }</pre>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyClientConnectedEvent
  */

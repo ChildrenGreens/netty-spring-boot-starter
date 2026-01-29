@@ -25,7 +25,7 @@ import io.netty.channel.ChannelPipeline;
  * <p>A client profile defines the default pipeline configuration for a specific
  * protocol or use case on the client side.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientProfileRegistry
  */

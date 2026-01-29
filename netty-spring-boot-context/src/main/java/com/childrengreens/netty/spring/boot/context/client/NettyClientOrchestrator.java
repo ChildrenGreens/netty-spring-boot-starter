@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit;
  * <li>Publishing lifecycle events ({@link NettyClientConnectedEvent}, {@link NettyClientDisconnectedEvent})</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientRuntime
  * @see NettyProperties

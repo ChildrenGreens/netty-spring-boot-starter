@@ -28,7 +28,7 @@ import io.netty.channel.socket.SocketChannel;
  * <p>Implementations handle the creation and configuration of server
  * bootstraps for different transport types (TCP, UDP, HTTP).
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see TransportFactory
  */

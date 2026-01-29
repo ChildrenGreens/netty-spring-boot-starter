@@ -26,7 +26,7 @@ import java.time.Instant;
  * <p>This provides a common foundation for server and client events,
  * enabling consistent event handling across the Netty Spring Boot framework.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public abstract class NettyEvent extends ApplicationEvent {

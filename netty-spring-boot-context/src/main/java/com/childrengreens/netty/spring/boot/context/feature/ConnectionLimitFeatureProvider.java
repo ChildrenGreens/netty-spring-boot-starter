@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Limits the maximum number of concurrent connections to prevent
  * resource exhaustion.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class ConnectionLimitFeatureProvider implements FeatureProvider {

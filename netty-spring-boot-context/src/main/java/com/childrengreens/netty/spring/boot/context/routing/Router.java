@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
  * <li>{@link RoutingMode#WS_PATH} - Match by WebSocket path</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see RouteDefinition
  */

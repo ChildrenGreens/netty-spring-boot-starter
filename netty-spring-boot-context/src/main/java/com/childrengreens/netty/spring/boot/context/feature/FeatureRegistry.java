@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>This registry holds all available feature providers and provides
  * ordered access for pipeline configuration.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see FeatureProvider
  */

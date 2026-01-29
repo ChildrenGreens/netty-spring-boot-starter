@@ -21,7 +21,7 @@ import io.netty.handler.logging.LogLevel;
 /**
  * Logging configuration for Netty handler.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class LoggingSpec {

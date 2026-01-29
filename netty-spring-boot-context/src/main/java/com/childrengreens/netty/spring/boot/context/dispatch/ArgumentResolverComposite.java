@@ -27,7 +27,7 @@ import java.util.Map;
 /**
  * Composite argument resolver that delegates to a list of resolvers.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ArgumentResolver
  */

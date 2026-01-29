@@ -44,7 +44,7 @@ import org.springframework.context.annotation.Bean;
  * <li>{@code spring.netty.enabled} property is not {@code false}</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyServerAutoConfiguration
  * @see NettyClientAutoConfiguration

@@ -30,7 +30,7 @@ import java.lang.annotation.Target;
  * the HTTP method specific variants {@link NettyHttpGet @NettyHttpGet},
  * {@link NettyHttpPost @NettyHttpPost}, etc.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyHttpGet
  * @see NettyHttpPost

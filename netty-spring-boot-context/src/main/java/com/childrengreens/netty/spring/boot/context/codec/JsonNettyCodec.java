@@ -29,7 +29,7 @@ import java.io.IOException;
  * <p>This codec provides JSON serialization and deserialization
  * using the Jackson library.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class JsonNettyCodec implements NettyCodec {

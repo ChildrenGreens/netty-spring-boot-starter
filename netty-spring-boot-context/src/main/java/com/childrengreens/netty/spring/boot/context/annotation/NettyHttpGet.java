@@ -28,7 +28,7 @@ import java.lang.annotation.Target;
  * <p>Specifically, {@code @NettyHttpGet} is a composed annotation that
  * acts as a shortcut for {@code @NettyHttpMapping(method = "GET")}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyController
  * @see NettyHttpPost

@@ -21,7 +21,7 @@ import org.springframework.boot.context.properties.NestedConfigurationProperty;
 /**
  * Default settings applied to all servers unless overridden.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class DefaultsSpec {

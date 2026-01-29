@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * Argument resolver for path variables annotated with {@link PathVar}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class PathVariableArgumentResolver implements ArgumentResolver {

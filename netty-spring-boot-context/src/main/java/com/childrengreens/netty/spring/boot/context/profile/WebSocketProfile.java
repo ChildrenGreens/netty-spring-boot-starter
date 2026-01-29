@@ -31,7 +31,7 @@ import io.netty.handler.codec.http.HttpServerCodec;
  * <li>WebSocket frame handlers added after upgrade</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class WebSocketProfile implements Profile {

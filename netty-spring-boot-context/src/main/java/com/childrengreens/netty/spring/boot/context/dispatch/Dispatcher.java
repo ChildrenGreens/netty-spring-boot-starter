@@ -45,7 +45,7 @@ import java.util.concurrent.CompletionStage;
  * <li>Response encoding using the appropriate codec</li>
  * </ol>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see Router
  */

@@ -32,7 +32,7 @@ import java.util.Map;
  * <p>This handler sits in the pipeline after frame decoders and before
  * business logic handlers. It converts between ByteBuf and Java objects.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyCodec
  */

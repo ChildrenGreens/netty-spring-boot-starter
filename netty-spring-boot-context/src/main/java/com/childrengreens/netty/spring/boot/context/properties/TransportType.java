@@ -22,7 +22,7 @@ package com.childrengreens.netty.spring.boot.context.properties;
  * <p>The transport type determines the underlying network protocol
  * and the corresponding Netty channel implementation.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public enum TransportType {

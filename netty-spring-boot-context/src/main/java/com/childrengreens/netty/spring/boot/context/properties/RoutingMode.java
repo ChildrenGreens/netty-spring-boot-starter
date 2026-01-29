@@ -22,7 +22,7 @@ package com.childrengreens.netty.spring.boot.context.properties;
  * <p>The routing mode determines how incoming messages are matched
  * to handler methods.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public enum RoutingMode {

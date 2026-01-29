@@ -25,7 +25,7 @@ import io.netty.channel.ChannelPipeline;
  * <p>This profile configures handlers for UDP datagram processing
  * with JSON serialization.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class UdpJsonProfile implements Profile {

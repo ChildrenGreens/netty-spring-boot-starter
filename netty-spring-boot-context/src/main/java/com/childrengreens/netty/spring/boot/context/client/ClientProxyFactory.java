@@ -34,7 +34,7 @@ import java.util.concurrent.CompletableFuture;
  * <p>This factory generates JDK dynamic proxies that translate method calls
  * into network requests using the configured client runtime.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyClient
  * @see NettyRequest

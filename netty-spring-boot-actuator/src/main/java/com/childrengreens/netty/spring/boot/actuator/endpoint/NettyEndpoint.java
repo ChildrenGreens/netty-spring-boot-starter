@@ -32,7 +32,7 @@ import java.util.Map;
  * <p>Exposes information about all configured Netty servers at
  * {@code /actuator/netty}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 @Endpoint(id = "netty")

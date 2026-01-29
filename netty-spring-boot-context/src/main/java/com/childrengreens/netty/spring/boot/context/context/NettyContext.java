@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * provides convenient access to channel attributes, remote address, and
  * trace information.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class NettyContext {

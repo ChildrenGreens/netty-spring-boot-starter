@@ -35,7 +35,7 @@ import java.util.List;
  * <p>This selector registers the {@link NettyClientRegistrar} with the
  * appropriate base packages to scan.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see EnableNettyClients
  */

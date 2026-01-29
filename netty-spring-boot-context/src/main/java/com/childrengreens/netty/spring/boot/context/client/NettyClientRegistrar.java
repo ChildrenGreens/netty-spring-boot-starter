@@ -46,7 +46,7 @@ import java.util.Set;
  * and registers them as bean definitions that will be resolved by the
  * {@link ClientProxyFactoryBean}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyClient
  * @see ClientProxyFactory

@@ -24,7 +24,7 @@ import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
  * <p>Implementations determine how to extract the routing key from
  * different message formats and protocols.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 @FunctionalInterface

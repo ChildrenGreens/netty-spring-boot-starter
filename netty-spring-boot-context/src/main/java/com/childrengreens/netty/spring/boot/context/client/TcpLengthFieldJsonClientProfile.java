@@ -31,7 +31,7 @@ import io.netty.handler.codec.LengthFieldPrepender;
  * <li>JSON codec for message serialization</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class TcpLengthFieldJsonClientProfile implements ClientProfile {

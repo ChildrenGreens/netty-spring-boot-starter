@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Transport starter for TCP-based servers (TCP, HTTP, WebSocket).
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class TcpTransportStarter implements TransportStarter {

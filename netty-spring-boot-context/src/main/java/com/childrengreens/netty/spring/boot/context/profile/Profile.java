@@ -26,7 +26,7 @@ import io.netty.channel.ChannelPipeline;
  * protocol or use case. Profiles encapsulate the handler chain setup
  * including frame decoders, codecs, and business handlers.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ProfileRegistry
  */

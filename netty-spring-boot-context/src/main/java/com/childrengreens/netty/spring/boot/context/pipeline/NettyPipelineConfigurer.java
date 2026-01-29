@@ -25,7 +25,7 @@ import io.netty.channel.ChannelPipeline;
  * <p>Users can implement this interface to add custom handlers to the
  * pipeline during server initialization.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 @FunctionalInterface

@@ -41,7 +41,7 @@ import java.lang.annotation.Target;
  * <li>{@link java.util.concurrent.CompletableFuture CompletableFuture} for async processing</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyMessageController
  */

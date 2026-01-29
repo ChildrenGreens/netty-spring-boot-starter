@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>This pool maintains a fixed number of connections to a remote server,
  * supports connection validation, and provides automatic connection creation.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientSpec
  * @see PoolSpec

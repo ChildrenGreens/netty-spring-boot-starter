@@ -50,7 +50,7 @@ import java.util.List;
  * <li>Custom configurers</li>
  * </ol>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see Profile
  * @see FeatureProvider

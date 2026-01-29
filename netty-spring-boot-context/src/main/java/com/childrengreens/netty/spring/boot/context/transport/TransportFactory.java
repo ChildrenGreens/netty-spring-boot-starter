@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
  * <p>This factory creates the appropriate event loop groups and channel
  * classes based on the platform and configuration.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class TransportFactory {

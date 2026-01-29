@@ -21,7 +21,7 @@ import java.lang.reflect.Method;
 /**
  * Definition of a route mapping a route key to a handler method.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see Router
  */

@@ -48,7 +48,7 @@ import java.lang.reflect.Parameter;
  * <li>{@link NettyHttpMapping} - Generic HTTP mapping</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class AnnotationRegistry implements BeanPostProcessor, BeanFactoryAware, InitializingBean {

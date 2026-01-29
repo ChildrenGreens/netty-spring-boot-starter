@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit;
  * <p>Adds {@link IdleStateHandler} to the pipeline for detecting
  * idle connections based on read/write/all idle timeouts.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class IdleFeatureProvider implements FeatureProvider {

@@ -29,7 +29,7 @@ import java.util.Map;
  * <p>This handler receives decoded response messages and routes them
  * to the appropriate pending request using correlation IDs.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see RequestInvoker
  */

@@ -33,7 +33,7 @@ import java.util.concurrent.*;
  * <p>This class manages the request-response correlation using correlation IDs,
  * handles timeouts, and provides both synchronous and asynchronous invocation.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ResponseFuture
  * @see ClientSpec

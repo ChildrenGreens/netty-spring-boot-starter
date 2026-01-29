@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * to wait for responses asynchronously with configurable timeouts.
  *
  * @param <T> the response type
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class ResponseFuture<T> {

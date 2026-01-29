@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
  * <p>Catches any exceptions that propagate through the pipeline and
  * logs them appropriately.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class ExceptionHandler extends ChannelDuplexHandler {

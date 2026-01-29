@@ -69,7 +69,7 @@ import java.util.List;
  * <p>This configuration is activated when {@code spring.netty.server.enabled}
  * is not explicitly set to {@code false}.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyClientAutoConfiguration
  */

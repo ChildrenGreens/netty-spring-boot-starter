@@ -27,7 +27,7 @@ import io.netty.handler.logging.LoggingHandler;
  * <p>Adds {@link LoggingHandler} to the pipeline for debugging
  * and monitoring channel activity.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class LoggingFeatureProvider implements FeatureProvider {

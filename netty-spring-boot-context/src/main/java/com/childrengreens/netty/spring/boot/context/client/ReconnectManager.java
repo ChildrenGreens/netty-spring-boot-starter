@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>This manager handles reconnection attempts when connections are lost,
  * using an exponential backoff strategy to avoid overwhelming the server.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientSpec
  * @see ReconnectSpec

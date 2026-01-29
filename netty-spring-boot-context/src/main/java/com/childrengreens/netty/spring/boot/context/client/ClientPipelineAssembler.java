@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * <p>This class assembles the channel pipeline for client connections,
  * configuring frame codecs, message codecs, idle handlers, and response handlers.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  * @see ClientProfile
  * @see ClientSpec

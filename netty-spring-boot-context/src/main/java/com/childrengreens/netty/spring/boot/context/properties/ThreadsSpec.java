@@ -19,7 +19,7 @@ package com.childrengreens.netty.spring.boot.context.properties;
 /**
  * Thread pool configuration for Netty event loop groups.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class ThreadsSpec {

@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Implements a token bucket algorithm for limiting the number of
  * requests per second on each channel.
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class RateLimitFeatureProvider implements FeatureProvider {

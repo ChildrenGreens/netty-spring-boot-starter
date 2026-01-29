@@ -35,7 +35,7 @@ import java.nio.charset.StandardCharsets;
  * <li>{@link StringEncoder} for converting strings to bytes</li>
  * </ul>
  *
- * @author Netty Spring Boot
+ * @author ChildrenGreens
  * @since 0.0.1
  */
 public class TcpLineProfile implements Profile {
