@@ -1,5 +1,7 @@
 # Netty Spring Boot Starter
 
+[![CircleCI](https://dl.circleci.com/status-badge/img/circleci/Uy51fPbZSgy15X8yEZTik4/YY1zfzyrviv8C9brtrcgbs/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/circleci/Uy51fPbZSgy15X8yEZTik4/YY1zfzyrviv8C9brtrcgbs/tree/main)
+[![codecov](https://codecov.io/github/ChildrenGreens/netty-spring-boot-starter/graph/badge.svg?token=1HN5FLYOZ8)](https://codecov.io/github/ChildrenGreens/netty-spring-boot-starter)
 [![Java](https://img.shields.io/badge/Java-17+-blue.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5+-green.svg)](https://spring.io/projects/spring-boot)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
