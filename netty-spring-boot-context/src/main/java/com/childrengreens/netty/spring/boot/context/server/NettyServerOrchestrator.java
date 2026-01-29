@@ -136,19 +136,26 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
         EventLoopGroup bossGroup = transportFactory.createBossGroup(bossThreads);
         EventLoopGroup workerGroup = transportFactory.createWorkerGroup(workerThreads);
 
-        // Create channel initializer
-        ChannelInitializer<SocketChannel> initializer = new ChannelInitializer<>() {
-            @Override
-            protected void initChannel(SocketChannel ch) {
-                pipelineAssembler.assemble(ch.pipeline(), spec);
-            }
-        };
+        try {
+            // Create channel initializer
+            ChannelInitializer<SocketChannel> initializer = new ChannelInitializer<>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    pipelineAssembler.assemble(ch.pipeline(), spec);
+                }
+            };
 
-        // Start transport
-        TransportStarter starter = transportFactory.getTransportStarter(spec.getTransport());
-        ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer);
+            // Start transport
+            TransportStarter starter = transportFactory.getTransportStarter(spec.getTransport());
+            ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer);
 
-        runtimes.put(spec.getName(), runtime);
+            runtimes.put(spec.getName(), runtime);
+        } catch (Exception e) {
+            // Shutdown event loop groups on failure to prevent resource leak
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
+            throw e;
+        }
     }
 
     /**

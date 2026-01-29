@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -151,7 +152,7 @@ public class Router {
      * Extract path variable values from a matched path.
      */
     private Map<String, String> extractPathVariables(String pathTemplate, Matcher matcher) {
-        Map<String, String> variables = new ConcurrentHashMap<>();
+        Map<String, String> variables = new HashMap<>();
         Matcher varMatcher = PATH_VARIABLE_PATTERN.matcher(pathTemplate);
         int group = 1;
         while (varMatcher.find()) {

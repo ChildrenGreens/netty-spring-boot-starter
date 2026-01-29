@@ -165,9 +165,17 @@ public class ConnectionPool {
             throw new IllegalStateException("Max connections reached");
         }
 
+        ChannelFuture future = null;
         try {
-            ChannelFuture future = bootstrap.connect(clientSpec.getHost(), clientSpec.getPort());
-            future.await(clientSpec.getTimeout().getConnectMs(), TimeUnit.MILLISECONDS);
+            future = bootstrap.connect(clientSpec.getHost(), clientSpec.getPort());
+            boolean completed = future.await(clientSpec.getTimeout().getConnectMs(), TimeUnit.MILLISECONDS);
+
+            if (!completed) {
+                // Timeout: cancel the connection to prevent orphan channels
+                future.cancel(true);
+                totalConnections.decrementAndGet();
+                throw new TimeoutException("Connection timeout to " + clientSpec.getHost() + ":" + clientSpec.getPort());
+            }
 
             if (future.isSuccess()) {
                 Channel channel = future.channel();
@@ -179,9 +187,18 @@ public class ConnectionPool {
                         future.cause());
             }
         } catch (InterruptedException e) {
+            // Cancel pending connection on interrupt
+            future.cancel(true);
             totalConnections.decrementAndGet();
             Thread.currentThread().interrupt();
             throw new Exception("Connection interrupted", e);
+        } catch (RuntimeException e) {
+            // Ensure connection count is correct and close any established connection
+            if (future != null && future.isSuccess()) {
+                future.channel().close();
+            }
+            totalConnections.decrementAndGet();
+            throw e;
         }
     }
 
@@ -218,12 +235,15 @@ public class ConnectionPool {
                 return;
             }
 
-            // Check and close idle connections that have been idle too long
-            Channel channel;
-            while ((channel = idleChannels.poll()) != null) {
+            // Check all idle connections and close unhealthy ones
+            int size = idleChannels.size();
+            for (int i = 0; i < size; i++) {
+                Channel channel = idleChannels.poll();
+                if (channel == null) {
+                    break;
+                }
                 if (isChannelHealthy(channel)) {
                     idleChannels.offer(channel);
-                    break;
                 } else {
                     closeChannel(channel);
                 }
