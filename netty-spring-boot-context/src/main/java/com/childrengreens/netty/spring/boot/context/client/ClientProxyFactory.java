@@ -19,6 +19,10 @@ package com.childrengreens.netty.spring.boot.context.client;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyRequest;
 import com.childrengreens.netty.spring.boot.context.annotation.Param;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.type.TypeFactory;
 import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +46,16 @@ import java.util.concurrent.CompletableFuture;
 public class ClientProxyFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(ClientProxyFactory.class);
+    private static final ObjectMapper OBJECT_MAPPER = createDefaultObjectMapper();
 
     private final NettyClientOrchestrator orchestrator;
+
+    private static ObjectMapper createDefaultObjectMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+        return mapper;
+    }
 
     /**
      * Create a new ClientProxyFactory.
@@ -224,12 +236,14 @@ public class ClientProxyFactory {
 
             Class<?> returnType = method.getReturnType();
             Type genericReturnType = method.getGenericReturnType();
+            Type targetType = returnType;
 
             // Handle CompletableFuture unwrapping
             if (CompletableFuture.class.isAssignableFrom(returnType) && genericReturnType instanceof ParameterizedType) {
                 Type[] typeArgs = ((ParameterizedType) genericReturnType).getActualTypeArguments();
                 if (typeArgs.length > 0 && typeArgs[0] instanceof Class) {
                     returnType = (Class<?>) typeArgs[0];
+                    targetType = typeArgs[0];
                 }
             }
 
@@ -238,11 +252,11 @@ public class ClientProxyFactory {
                 return result;
             }
 
-            // If result is a Map, try to convert to the expected type
-            if (result instanceof Map && !Map.class.isAssignableFrom(returnType)) {
-                // This would require a proper object mapper
-                // For now, just return the map
-                logger.debug("Result is Map but expected type is {}, returning Map", returnType.getSimpleName());
+            try {
+                TypeFactory typeFactory = OBJECT_MAPPER.getTypeFactory();
+                return OBJECT_MAPPER.convertValue(result, typeFactory.constructType(targetType));
+            } catch (IllegalArgumentException e) {
+                logger.debug("Failed to convert result {} to type {}", result.getClass().getName(), targetType, e);
             }
 
             return result;

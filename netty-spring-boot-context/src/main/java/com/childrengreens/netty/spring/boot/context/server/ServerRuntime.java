@@ -140,17 +140,21 @@ public class ServerRuntime {
 
             // Shutdown worker group
             if (workerGroup != null && !workerGroup.isShutdown()) {
-                workerGroup.shutdownGracefully(quietPeriod, timeout, TimeUnit.MILLISECONDS);
+                workerGroup.shutdownGracefully(quietPeriod, timeout, TimeUnit.MILLISECONDS).sync();
             }
 
             // Shutdown boss group
             if (bossGroup != null && !bossGroup.isShutdown()) {
-                bossGroup.shutdownGracefully(quietPeriod, timeout, TimeUnit.MILLISECONDS);
+                bossGroup.shutdownGracefully(quietPeriod, timeout, TimeUnit.MILLISECONDS).sync();
             }
 
             this.state = ServerState.STOPPED;
             logger.info("Server [{}] stopped", serverName);
 
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Interrupted while stopping server [{}]", serverName, e);
+            this.state = ServerState.FAILED;
         } catch (Exception e) {
             logger.error("Error stopping server [{}]", serverName, e);
             this.state = ServerState.FAILED;

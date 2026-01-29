@@ -21,8 +21,10 @@ import com.childrengreens.netty.spring.boot.context.properties.ShutdownSpec;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoopGroup;
+import io.netty.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -108,11 +110,21 @@ class ServerRuntimeTest {
     @Test
     void stop_closesChannelAndShutdownGroups() throws Exception {
         ChannelFuture channelFuture = mock(ChannelFuture.class);
+        @SuppressWarnings("rawtypes")
+        Future workerFuture = mock(Future.class);
+        @SuppressWarnings("rawtypes")
+        Future bossFuture = mock(Future.class);
         when(bindChannel.isOpen()).thenReturn(true);
         when(bindChannel.close()).thenReturn(channelFuture);
         when(channelFuture.sync()).thenReturn(channelFuture);
         when(workerGroup.isShutdown()).thenReturn(false);
         when(bossGroup.isShutdown()).thenReturn(false);
+        Mockito.<Future<?>>when(workerGroup.shutdownGracefully(anyLong(), anyLong(), any()))
+                .thenReturn((Future<?>) workerFuture);
+        Mockito.<Future<?>>when(bossGroup.shutdownGracefully(anyLong(), anyLong(), any()))
+                .thenReturn((Future<?>) bossFuture);
+        when(workerFuture.sync()).thenReturn(workerFuture);
+        when(bossFuture.sync()).thenReturn(bossFuture);
 
         ServerRuntime runtime = new ServerRuntime(spec, bossGroup, workerGroup, bindChannel, ServerState.RUNNING);
 
@@ -121,6 +133,8 @@ class ServerRuntimeTest {
         verify(bindChannel).close();
         verify(workerGroup).shutdownGracefully(anyLong(), anyLong(), any());
         verify(bossGroup).shutdownGracefully(anyLong(), anyLong(), any());
+        verify(workerFuture).sync();
+        verify(bossFuture).sync();
         assertThat(runtime.getState()).isEqualTo(ServerState.STOPPED);
     }
 
@@ -143,23 +157,45 @@ class ServerRuntimeTest {
         when(bindChannel.isOpen()).thenReturn(false);
         when(workerGroup.isShutdown()).thenReturn(false);
         when(bossGroup.isShutdown()).thenReturn(false);
+        @SuppressWarnings("rawtypes")
+        Future workerFuture = mock(Future.class);
+        @SuppressWarnings("rawtypes")
+        Future bossFuture = mock(Future.class);
+        Mockito.<Future<?>>when(workerGroup.shutdownGracefully(anyLong(), anyLong(), any()))
+                .thenReturn((Future<?>) workerFuture);
+        Mockito.<Future<?>>when(bossGroup.shutdownGracefully(anyLong(), anyLong(), any()))
+                .thenReturn((Future<?>) bossFuture);
+        when(workerFuture.sync()).thenReturn(workerFuture);
+        when(bossFuture.sync()).thenReturn(bossFuture);
 
         ServerRuntime runtime = new ServerRuntime(spec, bossGroup, workerGroup, bindChannel, ServerState.RUNNING);
 
         runtime.stop(shutdownSpec);
 
         verify(bindChannel, never()).close();
+        verify(workerFuture).sync();
+        verify(bossFuture).sync();
         assertThat(runtime.getState()).isEqualTo(ServerState.STOPPED);
     }
 
     @Test
     void stop_withGracefulDisabled_usesZeroQuietPeriod() throws Exception {
         ChannelFuture channelFuture = mock(ChannelFuture.class);
+        @SuppressWarnings("rawtypes")
+        Future workerFuture = mock(Future.class);
+        @SuppressWarnings("rawtypes")
+        Future bossFuture = mock(Future.class);
         when(bindChannel.isOpen()).thenReturn(true);
         when(bindChannel.close()).thenReturn(channelFuture);
         when(channelFuture.sync()).thenReturn(channelFuture);
         when(workerGroup.isShutdown()).thenReturn(false);
         when(bossGroup.isShutdown()).thenReturn(false);
+        Mockito.<Future<?>>when(workerGroup.shutdownGracefully(anyLong(), anyLong(), any()))
+                .thenReturn((Future<?>) workerFuture);
+        Mockito.<Future<?>>when(bossGroup.shutdownGracefully(anyLong(), anyLong(), any()))
+                .thenReturn((Future<?>) bossFuture);
+        when(workerFuture.sync()).thenReturn(workerFuture);
+        when(bossFuture.sync()).thenReturn(bossFuture);
 
         shutdownSpec.setGraceful(false);
 
@@ -169,5 +205,23 @@ class ServerRuntimeTest {
 
         verify(workerGroup).shutdownGracefully(eq(0L), anyLong(), any());
         verify(bossGroup).shutdownGracefully(eq(0L), anyLong(), any());
+        verify(workerFuture).sync();
+        verify(bossFuture).sync();
+    }
+
+    @Test
+    void stop_whenInterrupted_setsFailedAndRestoresInterruptFlag() throws Exception {
+        ChannelFuture channelFuture = mock(ChannelFuture.class);
+        when(bindChannel.isOpen()).thenReturn(true);
+        when(bindChannel.close()).thenReturn(channelFuture);
+        when(channelFuture.sync()).thenThrow(new InterruptedException("interrupted"));
+
+        ServerRuntime runtime = new ServerRuntime(spec, bossGroup, workerGroup, bindChannel, ServerState.RUNNING);
+
+        runtime.stop(shutdownSpec);
+
+        assertThat(runtime.getState()).isEqualTo(ServerState.FAILED);
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        Thread.interrupted();
     }
 }

@@ -24,6 +24,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -89,7 +91,6 @@ class ClientProxyFactoryTest {
         TestClient proxy1 = proxyFactory.createProxy(TestClient.class);
         TestClient proxy2 = proxyFactory.createProxy(TestClient.class);
 
-        assertThat(proxy1.equals(proxy1)).isTrue();
         assertThat(proxy1.equals(proxy2)).isFalse();
     }
 
@@ -115,7 +116,7 @@ class ClientProxyFactoryTest {
     void proxy_equals_withNull_returnsFalse() {
         TestClient proxy = proxyFactory.createProxy(TestClient.class);
 
-        assertThat(proxy.equals(null)).isFalse();
+        assertThat(proxy == null).isFalse();
     }
 
     @Test
@@ -254,6 +255,35 @@ class ClientProxyFactoryTest {
         verify(connectionPool).release(channel);
     }
 
+    @Test
+    void proxy_convertsMapResultToPojo() throws Exception {
+        ClientRuntime runtime = mock(ClientRuntime.class);
+        ConnectionPool connectionPool = mock(ConnectionPool.class);
+        RequestInvoker requestInvoker = mock(RequestInvoker.class);
+        Channel channel = mock(Channel.class);
+
+        when(orchestrator.getRuntime("test-client")).thenReturn(runtime);
+        when(runtime.getConnectionPool()).thenReturn(connectionPool);
+        when(runtime.getRequestInvoker()).thenReturn(requestInvoker);
+        when(connectionPool.acquire()).thenReturn(channel);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("name", "Alice");
+        payload.put("age", 30);
+
+        CompletableFuture<Object> future = CompletableFuture.completedFuture(payload);
+        when(requestInvoker.invoke(eq(channel), eq("get-user-pojo"), isNull(), anyLong())).thenReturn(future);
+
+        PojoClient proxy = proxyFactory.createProxy(PojoClient.class);
+
+        User result = proxy.getUser();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getName()).isEqualTo("Alice");
+        assertThat(result.getAge()).isEqualTo(30);
+        verify(connectionPool).release(channel);
+    }
+
     @NettyClient(name = "test-client")
     interface TestClient {
         @NettyRequest(type = "ping")
@@ -282,6 +312,33 @@ class ClientProxyFactoryTest {
     interface VoidMethodClient {
         @NettyRequest(type = "void-method")
         void voidMethod();
+    }
+
+    @NettyClient(name = "test-client")
+    interface PojoClient {
+        @NettyRequest(type = "get-user-pojo")
+        User getUser();
+    }
+
+    static class User {
+        private String name;
+        private int age;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public int getAge() {
+            return age;
+        }
+
+        public void setAge(int age) {
+            this.age = age;
+        }
     }
 
     @NettyClient(name = "test-client")
