@@ -41,6 +41,33 @@ public class NettyContext {
     public static final AttributeKey<String> SERVER_NAME_KEY = AttributeKey.valueOf("netty.server.name");
 
     /**
+     * Attribute key for storing the protocol type in the channel.
+     * Used by {@link com.childrengreens.netty.spring.boot.context.handler.ExceptionHandler}
+     * to determine the appropriate error response format.
+     */
+    public static final AttributeKey<String> PROTOCOL_TYPE_KEY = AttributeKey.valueOf("netty.protocol.type");
+
+    /**
+     * Protocol type constant for HTTP.
+     */
+    public static final String PROTOCOL_HTTP = "HTTP";
+
+    /**
+     * Protocol type constant for WebSocket.
+     */
+    public static final String PROTOCOL_WEBSOCKET = "WEBSOCKET";
+
+    /**
+     * Protocol type constant for TCP.
+     */
+    public static final String PROTOCOL_TCP = "TCP";
+
+    /**
+     * Protocol type constant for UDP.
+     */
+    public static final String PROTOCOL_UDP = "UDP";
+
+    /**
      * Attribute key for storing the WebSocket path in the channel.
      */
     public static final AttributeKey<String> WS_PATH_KEY = AttributeKey.valueOf("netty.ws.path");

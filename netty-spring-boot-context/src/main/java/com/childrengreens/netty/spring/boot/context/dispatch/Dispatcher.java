@@ -191,12 +191,15 @@ public class Dispatcher {
         }
 
         if (returnValue instanceof CompletableFuture) {
-            return ((CompletableFuture<?>) returnValue).thenApply(this::wrapReturnValue);
+            return ((CompletableFuture<?>) returnValue)
+                    .thenApply(this::wrapReturnValue)
+                    .exceptionally(this::handleAsyncException);
         }
 
         if (returnValue instanceof CompletionStage) {
             return ((CompletionStage<?>) returnValue).toCompletableFuture()
-                    .thenApply(this::wrapReturnValue);
+                    .thenApply(this::wrapReturnValue)
+                    .exceptionally(this::handleAsyncException);
         }
 
         if (returnValue instanceof OutboundMessage) {
@@ -217,6 +220,12 @@ public class Dispatcher {
             return (OutboundMessage) value;
         }
         return OutboundMessage.ok(value);
+    }
+
+    private OutboundMessage handleAsyncException(Throwable ex) {
+        logger.error("Async handler error", ex);
+        String message = ex != null ? ex.getMessage() : "unknown";
+        return OutboundMessage.error(500, "Internal server error: " + message);
     }
 
     /**

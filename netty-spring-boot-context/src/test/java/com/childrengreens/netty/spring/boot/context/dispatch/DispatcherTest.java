@@ -150,6 +150,27 @@ class DispatcherTest {
     }
 
     @Test
+    void dispatch_handlerReturnsCompletableFuture_exception_returns500() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleAsyncThrows"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(500);
+    }
+
+    @Test
     void dispatch_handlerReturnsNull_returnsNull() throws Exception {
         TestHandler handler = new TestHandler();
         RouteDefinition route = new RouteDefinition("/test", null, handler,
@@ -319,6 +340,28 @@ class DispatcherTest {
         assertThat(result.getPayload()).isEqualTo("completion stage result");
     }
 
+    @Test
+    void dispatch_handlerReturnsCompletionStage_exception_returns500() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleAsyncCompletionStageThrows"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(500);
+    }
+
+
     // ==================== Tests for lines 199-203 (wrapReturnValue with null and OutboundMessage) ====================
 
     @Test
@@ -420,6 +463,11 @@ class DispatcherTest {
             return CompletableFuture.completedFuture("async result");
         }
 
+        public CompletableFuture<String> handleAsyncThrows() {
+            CompletableFuture<String> future = new CompletableFuture<>();
+            future.completeExceptionally(new RuntimeException("async error"));
+            return future;
+        }
         public String handleReturnsNull() {
             return null;
         }
@@ -448,6 +496,12 @@ class DispatcherTest {
         // Methods for testing CompletionStage (lines 183-185)
         public CompletionStage<String> handleAsyncCompletionStage() {
             return CompletableFuture.completedFuture("completion stage result");
+        }
+
+        public CompletionStage<String> handleAsyncCompletionStageThrows() {
+            CompletableFuture<String> future = new CompletableFuture<>();
+            future.completeExceptionally(new RuntimeException("async error"));
+            return future;
         }
 
         // Methods for testing wrapReturnValue (lines 199-203)

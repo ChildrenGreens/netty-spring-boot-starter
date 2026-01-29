@@ -34,9 +34,9 @@ import java.util.Map;
  * <p>Registers the following metrics:
  * <ul>
  * <li>{@code netty.server.state} - Current state of each server (1=running, 0=not running)</li>
- * <li>{@code netty.connections.active} - Number of active connections</li>
- * <li>{@code netty.bytes.received} - Total bytes received</li>
- * <li>{@code netty.bytes.sent} - Total bytes sent</li>
+ * <li>{@code netty.connections.active} - Number of active connections (TODO)</li>
+ * <li>{@code netty.bytes.received} - Total bytes received (TODO)</li>
+ * <li>{@code netty.bytes.sent} - Total bytes sent (TODO)</li>
  * </ul>
  *
  * @author ChildrenGreens
