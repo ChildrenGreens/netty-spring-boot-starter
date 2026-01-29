@@ -24,6 +24,7 @@ import io.netty.channel.ChannelFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -46,6 +47,7 @@ public class ConnectionPool {
     private final ClientSpec clientSpec;
     private final Bootstrap bootstrap;
     private final BlockingQueue<Channel> idleChannels;
+    private final Set<Channel> borrowedChannels = ConcurrentHashMap.newKeySet();
     private final AtomicInteger totalConnections = new AtomicInteger(0);
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final ScheduledExecutorService scheduler;
@@ -96,6 +98,7 @@ public class ConnectionPool {
 
         if (channel != null) {
             if (isChannelHealthy(channel)) {
+                borrowedChannels.add(channel);
                 logger.debug("Acquired existing channel from pool: {}", channel);
                 return channel;
             } else {
@@ -106,17 +109,22 @@ public class ConnectionPool {
 
         // Try to create a new channel if under max limit
         if (totalConnections.get() < poolSpec.getMaxConnections()) {
-            return createChannel();
+            channel = createChannel();
+            borrowedChannels.add(channel);
+            return channel;
         }
 
         // Wait for an available channel
         channel = idleChannels.poll(poolSpec.getAcquireTimeoutMs(), TimeUnit.MILLISECONDS);
         if (channel != null) {
             if (isChannelHealthy(channel)) {
+                borrowedChannels.add(channel);
                 return channel;
             } else {
                 closeChannel(channel);
-                return createChannel();
+                channel = createChannel();
+                borrowedChannels.add(channel);
+                return channel;
             }
         }
 
@@ -131,6 +139,9 @@ public class ConnectionPool {
         if (channel == null) {
             return;
         }
+
+        // Remove from borrowed set
+        borrowedChannels.remove(channel);
 
         if (closed.get()) {
             closeChannel(channel);
@@ -160,7 +171,15 @@ public class ConnectionPool {
      * @throws Exception if channel creation fails
      */
     private Channel createChannel() throws Exception {
-        if (totalConnections.incrementAndGet() > clientSpec.getPool().getMaxConnections()) {
+        int current = totalConnections.incrementAndGet();
+
+        // Check if pool was closed after increment
+        if (closed.get()) {
+            totalConnections.decrementAndGet();
+            throw new IllegalStateException("Connection pool is closed");
+        }
+
+        if (current > clientSpec.getPool().getMaxConnections()) {
             totalConnections.decrementAndGet();
             throw new IllegalStateException("Max connections reached");
         }
@@ -179,6 +198,14 @@ public class ConnectionPool {
 
             if (future.isSuccess()) {
                 Channel channel = future.channel();
+
+                // Check again if pool was closed during connection
+                if (closed.get()) {
+                    channel.close();
+                    totalConnections.decrementAndGet();
+                    throw new IllegalStateException("Connection pool is closed");
+                }
+
                 logger.info("Created new connection to {}:{}", clientSpec.getHost(), clientSpec.getPort());
                 return channel;
             } else {
@@ -291,16 +318,39 @@ public class ConnectionPool {
     }
 
     /**
+     * Return the number of borrowed (in-use) connections.
+     * @return the borrowed connections
+     */
+    public int getBorrowedConnections() {
+        return borrowedChannels.size();
+    }
+
+    /**
      * Close the connection pool.
      */
     public void close() {
         if (closed.compareAndSet(false, true)) {
             scheduler.shutdown();
 
+            // Close idle connections (closeChannel will decrement totalConnections)
             Channel channel;
             while ((channel = idleChannels.poll()) != null) {
-                channel.close();
+                closeChannel(channel);
             }
+
+            // Close borrowed connections
+            int borrowedCount = borrowedChannels.size();
+            if (borrowedCount > 0) {
+                logger.warn("Closing {} borrowed connection(s) for client [{}]",
+                        borrowedCount, clientSpec.getName());
+            }
+            for (Channel borrowed : borrowedChannels) {
+                closeChannel(borrowed);
+            }
+            borrowedChannels.clear();
+
+            // Do not reset totalConnections to 0 - let it naturally reach 0
+            // through closeChannel decrements to avoid race conditions with in-flight connections
 
             logger.info("Connection pool closed for client [{}]", clientSpec.getName());
         }

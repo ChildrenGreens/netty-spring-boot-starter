@@ -243,4 +243,90 @@ class ConnectionLimitFeatureProviderTest {
         channel2.close();
         channel3.close();
     }
+
+    @Test
+    void connectionLimitHandler_rejectedConnectionDoesNotDoubleDecrement() {
+        // This test verifies the fix for double-decrement bug:
+        // When a connection is rejected due to limit, channelInactive should NOT decrement again
+        ConnectionLimitFeatureProvider.ConnectionLimitHandler handler =
+                new ConnectionLimitFeatureProvider.ConnectionLimitHandler(2);
+
+        // Create and activate two channels to fill the limit
+        EmbeddedChannel channel1 = new EmbeddedChannel(handler);
+        EmbeddedChannel channel2 = new EmbeddedChannel(handler);
+
+        assertThat(handler.getCurrentConnections()).isEqualTo(2);
+
+        // Create a third channel that will be rejected
+        EmbeddedChannel channel3 = new EmbeddedChannel(handler);
+
+        // Channel3 should be closed due to limit exceeded
+        assertThat(channel3.isOpen()).isFalse();
+
+        // Connection count should still be 2, not negative
+        // Before fix: count would be 1 (double decrement: once in channelActive, once in channelInactive)
+        // After fix: count should be 2
+        assertThat(handler.getCurrentConnections()).isEqualTo(2);
+
+        // Close channel1 and channel2
+        channel1.close();
+        channel2.close();
+
+        // Count should be 0, not negative
+        assertThat(handler.getCurrentConnections()).isEqualTo(0);
+    }
+
+    @Test
+    void connectionLimitHandler_multipleRejectedConnectionsDoNotCauseNegativeCount() {
+        // Test multiple rejected connections to ensure count never goes negative
+        ConnectionLimitFeatureProvider.ConnectionLimitHandler handler =
+                new ConnectionLimitFeatureProvider.ConnectionLimitHandler(1);
+
+        // Fill the limit with one connection
+        EmbeddedChannel channel1 = new EmbeddedChannel(handler);
+        assertThat(handler.getCurrentConnections()).isEqualTo(1);
+
+        // Try to connect 10 more channels, all should be rejected
+        for (int i = 0; i < 10; i++) {
+            EmbeddedChannel rejectedChannel = new EmbeddedChannel(handler);
+            assertThat(rejectedChannel.isOpen()).isFalse();
+        }
+
+        // Connection count should still be 1, not negative
+        assertThat(handler.getCurrentConnections()).isEqualTo(1);
+
+        // Close the original channel
+        channel1.close();
+
+        assertThat(handler.getCurrentConnections()).isEqualTo(0);
+    }
+
+    @Test
+    void connectionLimitHandler_newConnectionsAllowedAfterRejectionAndClose() {
+        // Verify that after rejecting connections and then closing active ones,
+        // new connections can be accepted again
+        ConnectionLimitFeatureProvider.ConnectionLimitHandler handler =
+                new ConnectionLimitFeatureProvider.ConnectionLimitHandler(2);
+
+        EmbeddedChannel channel1 = new EmbeddedChannel(handler);
+        EmbeddedChannel channel2 = new EmbeddedChannel(handler);
+
+        // Reject one
+        EmbeddedChannel rejected = new EmbeddedChannel(handler);
+        assertThat(rejected.isOpen()).isFalse();
+
+        // Count should be 2
+        assertThat(handler.getCurrentConnections()).isEqualTo(2);
+
+        // Close one active connection
+        channel1.close();
+
+        // Now a new connection should be accepted
+        EmbeddedChannel channel3 = new EmbeddedChannel(handler);
+        assertThat(channel3.isOpen()).isTrue();
+        assertThat(handler.getCurrentConnections()).isEqualTo(2);
+
+        channel2.close();
+        channel3.close();
+    }
 }

@@ -22,8 +22,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -171,6 +179,154 @@ class RouterTest {
 
         assertThat(result.getRoute()).isEqualTo(route);
         assertThat(result.getPathVariables()).isEqualTo(pathVariables);
+    }
+
+    @Test
+    void concurrentRegisterAndFindRoute_doesNotThrowConcurrentModificationException() throws Exception {
+        // This test verifies the fix for ConcurrentModificationException
+        // when registering routes while simultaneously finding routes
+        Method method = TestController.class.getMethod("handleGet");
+        TestController controller = new TestController();
+
+        int numThreads = 10;
+        int operationsPerThread = 100;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(numThreads);
+        AtomicBoolean exceptionOccurred = new AtomicBoolean(false);
+        AtomicInteger successfulFinds = new AtomicInteger(0);
+
+        // Pre-register some routes
+        for (int i = 0; i < 10; i++) {
+            RouteDefinition route = new RouteDefinition("/api/users/{id" + i + "}", "GET",
+                    controller, method, Void.class, null);
+            router.register(route);
+        }
+
+        // Start threads that concurrently register and find routes
+        for (int t = 0; t < numThreads; t++) {
+            final int threadId = t;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+
+                    for (int i = 0; i < operationsPerThread; i++) {
+                        // Half threads register, half threads find
+                        if (threadId % 2 == 0) {
+                            // Register new pattern routes
+                            RouteDefinition route = new RouteDefinition(
+                                    "/api/thread" + threadId + "/resource/{id" + i + "}",
+                                    "GET", controller, method, Void.class, null);
+                            router.register(route);
+                        } else {
+                            // Find existing routes
+                            Map<String, Object> headers = new HashMap<>();
+                            headers.put("httpMethod", "GET");
+                            InboundMessage message = InboundMessage.builder()
+                                    .transport(TransportType.HTTP)
+                                    .routeKey("/api/users/123")
+                                    .headers(headers)
+                                    .build();
+
+                            Router.RouteResult result = router.findRoute(message, null);
+                            if (result != null) {
+                                successfulFinds.incrementAndGet();
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    exceptionOccurred.set(true);
+                    e.printStackTrace();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        // Start all threads simultaneously
+        startLatch.countDown();
+
+        // Wait for all threads to complete
+        boolean completed = doneLatch.await(30, TimeUnit.SECONDS);
+
+        executor.shutdown();
+
+        assertThat(completed).isTrue();
+        // Before fix: ConcurrentModificationException would occur
+        // After fix: No exception should occur
+        assertThat(exceptionOccurred.get()).isFalse();
+        assertThat(successfulFinds.get()).isGreaterThan(0);
+    }
+
+    @Test
+    void concurrentRegisterAndFindExactRoute_doesNotThrowConcurrentModificationException() throws Exception {
+        // Test concurrent access to exact routes (ConcurrentHashMap with CopyOnWriteArrayList values)
+        Method method = TestController.class.getMethod("handleGet");
+        TestController controller = new TestController();
+
+        int numThreads = 10;
+        int operationsPerThread = 100;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(numThreads);
+        AtomicBoolean exceptionOccurred = new AtomicBoolean(false);
+        List<Throwable> exceptions = new ArrayList<>();
+
+        // Pre-register some exact routes
+        for (int i = 0; i < 10; i++) {
+            RouteDefinition route = new RouteDefinition("/api/exact" + i, "GET",
+                    controller, method, Void.class, "server" + (i % 3));
+            router.register(route);
+        }
+
+        for (int t = 0; t < numThreads; t++) {
+            final int threadId = t;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+
+                    for (int i = 0; i < operationsPerThread; i++) {
+                        if (threadId % 2 == 0) {
+                            // Register new exact routes to same key (different servers)
+                            RouteDefinition route = new RouteDefinition(
+                                    "/api/exact0", "GET", controller, method, Void.class,
+                                    "server" + threadId + "_" + i);
+                            router.register(route);
+                        } else {
+                            // Find routes
+                            Map<String, Object> headers = new HashMap<>();
+                            headers.put("httpMethod", "GET");
+                            InboundMessage message = InboundMessage.builder()
+                                    .transport(TransportType.HTTP)
+                                    .routeKey("/api/exact0")
+                                    .headers(headers)
+                                    .build();
+
+                            // Iterate through routes for different servers
+                            router.findRoute(message, "server0");
+                            router.findRoute(message, "server1");
+                            router.findRoute(message, "server2");
+                        }
+                    }
+                } catch (Exception e) {
+                    synchronized (exceptions) {
+                        exceptions.add(e);
+                    }
+                    exceptionOccurred.set(true);
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+        boolean completed = doneLatch.await(30, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(completed).isTrue();
+        assertThat(exceptionOccurred.get())
+                .withFailMessage("Exceptions occurred: " + exceptions)
+                .isFalse();
     }
 
     // Test controller class

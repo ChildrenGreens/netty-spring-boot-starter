@@ -24,6 +24,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -86,8 +87,7 @@ class RequestInvokerTest {
 
         invoker.invoke(channel, "order", Map.of("orderId", "123"), 0);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = (Map<String, Object>) channel.readOutbound();
+        Map<String, Object> request = channel.readOutbound();
         assertThat(request.get("type")).isEqualTo("order");
         assertThat(request.get("orderId")).isEqualTo("123");
 
@@ -100,8 +100,7 @@ class RequestInvokerTest {
 
         invoker.invokeOneWay(channel, "notify", Map.of("event", "test"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = (Map<String, Object>) channel.readOutbound();
+        Map<String, Object> request = channel.readOutbound();
         assertThat(request.get("type")).isEqualTo("notify");
         assertThat(request.get("event")).isEqualTo("test");
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNull();
@@ -122,8 +121,7 @@ class RequestInvokerTest {
 
         CompletableFuture<Object> future = invoker.invoke(channel, "test", null, 0);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> request = (Map<String, Object>) channel.readOutbound();
+        Map<String, Object> request = channel.readOutbound();
         String correlationId = (String) request.get(RequestInvoker.CORRELATION_ID_HEADER);
 
         invoker.failRequest(correlationId, new RuntimeException("Test error"));
@@ -182,6 +180,96 @@ class RequestInvokerTest {
         assertThat(future.isDone()).isFalse();
 
         shortInvoker.close();
+        channel.close();
+    }
+
+    @Test
+    void invoke_reservedFieldsNotOverwrittenByPayload() {
+        // This test verifies the fix for reserved header fields being overwritten
+        // When payload contains 'type' or 'X-Correlation-Id', they should be ignored
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        Map<String, Object> maliciousPayload = new HashMap<>();
+        maliciousPayload.put("type", "malicious-type");  // Try to override type
+        maliciousPayload.put(RequestInvoker.CORRELATION_ID_HEADER, "fake-correlation-id");  // Try to override correlation id
+        maliciousPayload.put("data", "legitimate-data");
+
+        invoker.invoke(channel, "actual-type", maliciousPayload, 0);
+
+        Map<String, Object> request = channel.readOutbound();
+
+        // Before fix: type would be "malicious-type" and correlationId would be "fake-correlation-id"
+        // After fix: reserved fields should retain their correct values
+        assertThat(request.get("type")).isEqualTo("actual-type");
+        assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotEqualTo("fake-correlation-id");
+        assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
+        // Payload data should still be included
+        assertThat(request.get("data")).isEqualTo("legitimate-data");
+
+        channel.close();
+    }
+
+    @Test
+    void invokeOneWay_reservedFieldsNotOverwrittenByPayload() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "wrong-type");  // Try to override type
+        payload.put(RequestInvoker.CORRELATION_ID_HEADER, "fake-correlation-id");
+        payload.put("value", "test-value");
+
+        invoker.invokeOneWay(channel, "correct-type", payload);
+
+        Map<String, Object> request = channel.readOutbound();
+
+        assertThat(request.get("type")).isEqualTo("correct-type");
+        assertThat(request.get("value")).isEqualTo("test-value");
+        // One-way requests don't have correlation id
+        assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNull();
+
+        channel.close();
+    }
+
+    @Test
+    void invoke_whenMessageTypeNull_doesNotAllowPayloadTypeInjection() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "injected-type");
+        payload.put("data", "payload-data");
+
+        invoker.invoke(channel, null, payload, 0);
+
+        Map<String, Object> request = channel.readOutbound();
+
+        // Reserved fields should be filtered from payload even when messageType is null
+        assertThat(request.get("type")).isNull();
+        assertThat(request.get("data")).isEqualTo("payload-data");
+
+        channel.close();
+    }
+
+    @Test
+    void invoke_payloadDataPreservedWhenNotConflicting() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("orderId", "12345");
+        payload.put("amount", 100);
+        payload.put("currency", "USD");
+
+        invoker.invoke(channel, "createOrder", payload, 0);
+
+        Map<String, Object> request = channel.readOutbound();
+
+        // All payload fields should be preserved
+        assertThat(request.get("orderId")).isEqualTo("12345");
+        assertThat(request.get("amount")).isEqualTo(100);
+        assertThat(request.get("currency")).isEqualTo("USD");
+        // Reserved fields should be set correctly
+        assertThat(request.get("type")).isEqualTo("createOrder");
+        assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
+
         channel.close();
     }
 

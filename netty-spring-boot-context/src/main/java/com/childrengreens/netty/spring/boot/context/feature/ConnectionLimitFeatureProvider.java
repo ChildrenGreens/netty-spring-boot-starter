@@ -22,6 +22,7 @@ import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
+import io.netty.util.AttributeKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -87,7 +88,14 @@ public class ConnectionLimitFeatureProvider implements FeatureProvider {
      * Sharable channel handler that tracks and limits concurrent connections.
      */
     @Sharable
-    private static class ConnectionLimitHandler extends ChannelInboundHandlerAdapter {
+    static class ConnectionLimitHandler extends ChannelInboundHandlerAdapter {
+
+        /**
+         * Attribute key to mark channels that were rejected due to connection limit.
+         * These channels should not decrement the counter in channelInactive.
+         */
+        private static final AttributeKey<Boolean> REJECTED_KEY =
+                AttributeKey.valueOf("connectionLimitRejected");
 
         private final int maxConnections;
         private final AtomicInteger currentConnections = new AtomicInteger(0);
@@ -102,6 +110,8 @@ public class ConnectionLimitFeatureProvider implements FeatureProvider {
 
             if (current > maxConnections) {
                 currentConnections.decrementAndGet();
+                // Mark this channel as rejected so channelInactive won't decrement again
+                ctx.channel().attr(REJECTED_KEY).set(Boolean.TRUE);
                 logger.warn("Connection limit reached ({}/{}), rejecting: {}",
                         current - 1, maxConnections, ctx.channel().remoteAddress());
                 ctx.close();
@@ -115,9 +125,13 @@ public class ConnectionLimitFeatureProvider implements FeatureProvider {
 
         @Override
         public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-            int current = currentConnections.decrementAndGet();
-            logger.debug("Connection closed ({}/{}): {}",
-                    current, maxConnections, ctx.channel().remoteAddress());
+            // Only decrement if this channel was not rejected
+            Boolean rejected = ctx.channel().attr(REJECTED_KEY).get();
+            if (rejected == null || !rejected) {
+                int current = currentConnections.decrementAndGet();
+                logger.debug("Connection closed ({}/{}): {}",
+                        current, maxConnections, ctx.channel().remoteAddress());
+            }
             super.channelInactive(ctx);
         }
 

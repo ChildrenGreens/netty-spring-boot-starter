@@ -21,12 +21,12 @@ import com.childrengreens.netty.spring.boot.context.properties.RoutingMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -60,8 +60,9 @@ public class Router {
 
     /**
      * Routes with path variables for pattern matching.
+     * Uses CopyOnWriteArrayList for thread-safe iteration without external synchronization.
      */
-    private final List<PatternRoute> patternRoutes = Collections.synchronizedList(new ArrayList<>());
+    private final List<PatternRoute> patternRoutes = new CopyOnWriteArrayList<>();
 
     /**
      * Register a route definition.
@@ -77,7 +78,8 @@ public class Router {
             logger.debug("Registered pattern route: {} -> {}", route.getRouteKey(), route.getMethod());
         } else {
             // Register as exact route
-            exactRoutes.computeIfAbsent(key, k -> Collections.synchronizedList(new ArrayList<>()))
+            // Use CopyOnWriteArrayList for thread-safe iteration
+            exactRoutes.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>())
                     .add(route);
             logger.debug("Registered exact route: {} -> {}", key, route.getMethod());
         }

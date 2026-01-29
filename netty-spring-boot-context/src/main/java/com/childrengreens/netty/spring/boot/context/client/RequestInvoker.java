@@ -135,23 +135,32 @@ public class RequestInvoker {
      * @param payload the payload
      * @return the request message
      */
+    @SuppressWarnings("unchecked")
     private Map<String, Object> buildRequest(String messageType, String correlationId, Object payload) {
         Map<String, Object> request = new HashMap<>();
-        request.put(MESSAGE_TYPE_HEADER, messageType);
 
-        if (correlationId != null) {
-            request.put(CORRELATION_ID_HEADER, correlationId);
-        }
-
+        // Filter reserved keys from payload to prevent override/injection
         if (payload != null) {
             if (payload instanceof Map) {
-                request.putAll((Map<String, Object>) payload);
+                Map<String, Object> payloadMap = new HashMap<>((Map<String, Object>) payload);
+                payloadMap.remove(MESSAGE_TYPE_HEADER);
+                payloadMap.remove(CORRELATION_ID_HEADER);
+                request.putAll(payloadMap);
             } else if (payload instanceof String) {
                 request.put("data", payload);
             } else {
                 // Serialize complex objects
                 request.put("data", payload);
             }
+        }
+
+        // Set reserved fields only when provided
+        if (messageType != null) {
+            request.put(MESSAGE_TYPE_HEADER, messageType);
+        }
+
+        if (correlationId != null) {
+            request.put(CORRELATION_ID_HEADER, correlationId);
         }
 
         return request;

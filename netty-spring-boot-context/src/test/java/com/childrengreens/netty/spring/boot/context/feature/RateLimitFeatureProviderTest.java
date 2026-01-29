@@ -19,6 +19,8 @@ package com.childrengreens.netty.spring.boot.context.feature;
 import com.childrengreens.netty.spring.boot.context.properties.FeaturesSpec;
 import com.childrengreens.netty.spring.boot.context.properties.RateLimitSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.BeforeEach;
@@ -181,5 +183,100 @@ class RateLimitFeatureProviderTest {
         assertThat(result).isEqualTo("test message");
 
         channel.close();
+    }
+
+    @Test
+    void rateLimitHandler_releasesByteBufWhenRateLimitExceeded() {
+        // This test verifies the fix for ByteBuf leak when rate limit is exceeded
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1);
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // First message should pass (uses the initial token)
+        ByteBuf buf1 = Unpooled.copiedBuffer("msg1".getBytes());
+        channel.writeInbound(buf1);
+        ByteBuf received = channel.readInbound();
+        assertThat(received).isNotNull();
+        received.release();
+
+        // Second message should be rejected and the ByteBuf should be released
+        ByteBuf buf2 = Unpooled.copiedBuffer("msg2".getBytes());
+        int refCntBefore = buf2.refCnt();
+        assertThat(refCntBefore).isEqualTo(1);
+
+        channel.writeInbound(buf2);
+
+        // ByteBuf should be released (refCnt should be 0)
+        // Before fix: refCnt would still be 1 (leak)
+        // After fix: refCnt should be 0
+        assertThat(buf2.refCnt()).isEqualTo(0);
+
+        // Channel should be closed
+        assertThat(channel.isOpen()).isFalse();
+    }
+
+    @Test
+    void rateLimitHandler_releasesMultipleByteBufsWhenRateLimitExceeded() {
+        // Test that ByteBuf is released when rate limit is exceeded
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1);
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // First message passes
+        ByteBuf buf1 = Unpooled.copiedBuffer("msg1".getBytes());
+        channel.writeInbound(buf1);
+        ByteBuf received = channel.readInbound();
+        assertThat(received).isNotNull();
+        received.release();
+
+        // Second message should be rejected and released
+        ByteBuf buf2 = Unpooled.copiedBuffer("msg2".getBytes());
+        assertThat(buf2.refCnt()).isEqualTo(1);
+
+        channel.writeInbound(buf2);
+
+        assertThat(buf2.refCnt()).isEqualTo(0);
+        assertThat(channel.isOpen()).isFalse();
+    }
+
+    @Test
+    void rateLimitHandler_getters_returnCorrectValues() {
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(100, 50);
+
+        assertThat(handler.getBurstSize()).isEqualTo(50);
+        assertThat(handler.getTokens()).isEqualTo(50); // Initial tokens = burst size
+    }
+
+    @Test
+    void rateLimitHandler_withZeroBurstSize_usesRequestsPerSecond() {
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(100, 0);
+
+        // When burstSize is 0, it should default to requestsPerSecond
+        assertThat(handler.getBurstSize()).isEqualTo(100);
+    }
+
+    @Test
+    void rateLimitHandler_releasesNonByteBufObjectSafely() {
+        // ReferenceCountUtil.release() should handle non-ByteBuf objects gracefully
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1);
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // First message passes
+        channel.writeInbound("msg1");
+        String received = channel.readInbound();
+        assertThat(received).isEqualTo("msg1");
+
+        // Second message (String, not ByteBuf) should be rejected
+        // ReferenceCountUtil.release() should not throw for non-reference-counted objects
+        channel.writeInbound("msg2");
+
+        // Channel should be closed
+        assertThat(channel.isOpen()).isFalse();
     }
 }

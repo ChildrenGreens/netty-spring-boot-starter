@@ -154,9 +154,18 @@ public class ReconnectManager {
         logger.info("Attempting reconnection for client [{}] (attempt {}/{})",
                 clientSpec.getName(), currentRetry, maxRetries < 0 ? "∞" : maxRetries);
 
+        ChannelFuture future = null;
         try {
-            ChannelFuture future = bootstrap.connect(clientSpec.getHost(), clientSpec.getPort());
-            future.await(clientSpec.getTimeout().getConnectMs(), TimeUnit.MILLISECONDS);
+            future = bootstrap.connect(clientSpec.getHost(), clientSpec.getPort());
+            boolean completed = future.await(clientSpec.getTimeout().getConnectMs(), TimeUnit.MILLISECONDS);
+
+            if (!completed) {
+                // Timeout: cancel the connection to prevent orphan channels
+                future.cancel(true);
+                handleReconnectFailure(new java.util.concurrent.TimeoutException(
+                        "Connection timeout to " + clientSpec.getHost() + ":" + clientSpec.getPort()));
+                return;
+            }
 
             if (future.isSuccess()) {
                 Channel channel = future.channel();
@@ -176,6 +185,8 @@ public class ReconnectManager {
                 handleReconnectFailure(future.cause());
             }
         } catch (InterruptedException e) {
+            // Cancel pending connection on interrupt
+            future.cancel(true);
             Thread.currentThread().interrupt();
             reconnecting.set(false);
         } catch (Exception e) {

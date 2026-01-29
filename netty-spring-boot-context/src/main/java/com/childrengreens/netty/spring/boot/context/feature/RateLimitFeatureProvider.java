@@ -21,6 +21,7 @@ import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
+import io.netty.util.ReferenceCountUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,7 +85,7 @@ public class RateLimitFeatureProvider implements FeatureProvider {
      * <p>This implementation is thread-safe using CAS (Compare-And-Swap) operations
      * to handle concurrent access to the token bucket.
      */
-    private static class RateLimitHandler extends ChannelInboundHandlerAdapter {
+    static class RateLimitHandler extends ChannelInboundHandlerAdapter {
 
         private final double requestsPerSecond;
         private final int burstSize;
@@ -114,8 +115,9 @@ public class RateLimitFeatureProvider implements FeatureProvider {
                 currentTokens = tokens.get();
             }
 
-            // No tokens available
+            // No tokens available - release the message to prevent memory leak
             logger.warn("Rate limit exceeded for channel: {}", ctx.channel().remoteAddress());
+            ReferenceCountUtil.release(msg);
             ctx.close();
         }
 
@@ -141,6 +143,22 @@ public class RateLimitFeatureProvider implements FeatureProvider {
             // Atomically update tokens, capped at burstSize
             final long addedTokens = tokensToAdd;
             tokens.updateAndGet(current -> Math.min(burstSize, current + addedTokens));
+        }
+
+        /**
+         * Return the current token count.
+         * @return the current tokens
+         */
+        long getTokens() {
+            return tokens.get();
+        }
+
+        /**
+         * Return the burst size.
+         * @return the burst size
+         */
+        int getBurstSize() {
+            return burstSize;
         }
     }
 

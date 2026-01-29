@@ -644,4 +644,231 @@ class ConnectionPoolTest {
         channel2.close();
     }
 
+    @Test
+    void close_closesBorrowedConnections() throws Exception {
+        // This test verifies the fix for borrowed connections not being closed
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+
+        EmbeddedChannel channel1 = new EmbeddedChannel();
+        EmbeddedChannel channel2 = new EmbeddedChannel();
+
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(mockFuture.isSuccess()).thenReturn(true);
+        when(mockFuture.channel()).thenReturn(channel1).thenReturn(channel2);
+
+        TimeoutSpec timeoutSpec = new TimeoutSpec();
+        timeoutSpec.setConnectMs(5000);
+        clientSpec.setTimeout(timeoutSpec);
+        clientSpec.getPool().setMaxConnections(5);
+
+        ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
+
+        // Acquire channels but don't release them
+        Channel borrowed1 = pool.acquire();
+        Channel borrowed2 = pool.acquire();
+
+        assertThat(pool.getBorrowedConnections()).isEqualTo(2);
+        assertThat(borrowed1.isOpen()).isTrue();
+        assertThat(borrowed2.isOpen()).isTrue();
+
+        // Close the pool
+        pool.close();
+
+        // Borrowed channels should be closed
+        assertThat(borrowed1.isOpen()).isFalse();
+        assertThat(borrowed2.isOpen()).isFalse();
+        assertThat(pool.getBorrowedConnections()).isEqualTo(0);
+        // totalConnections will naturally reach 0 through closeChannel decrements
+        assertThat(pool.getTotalConnections()).isEqualTo(0);
+    }
+
+    @Test
+    void close_closesBothIdleAndBorrowedConnections() throws Exception {
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+
+        EmbeddedChannel channel1 = new EmbeddedChannel();
+        EmbeddedChannel channel2 = new EmbeddedChannel();
+        EmbeddedChannel channel3 = new EmbeddedChannel();
+
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(mockFuture.isSuccess()).thenReturn(true);
+        when(mockFuture.channel()).thenReturn(channel1).thenReturn(channel2).thenReturn(channel3);
+
+        TimeoutSpec timeoutSpec = new TimeoutSpec();
+        timeoutSpec.setConnectMs(5000);
+        clientSpec.setTimeout(timeoutSpec);
+        clientSpec.getPool().setMaxConnections(5);
+
+        ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
+
+        // Acquire and release one (goes to idle)
+        Channel acquired1 = pool.acquire();
+        pool.release(acquired1);
+
+        // Acquire two more (stay borrowed)
+        Channel borrowed1 = pool.acquire();
+        Channel borrowed2 = pool.acquire();
+
+        assertThat(pool.getIdleConnections()).isEqualTo(0); // acquired1 was re-acquired as borrowed1
+        assertThat(pool.getBorrowedConnections()).isEqualTo(2);
+
+        // Close pool
+        pool.close();
+
+        // All connections should be closed
+        assertThat(channel1.isOpen()).isFalse();
+        assertThat(channel2.isOpen()).isFalse();
+        assertThat(pool.getIdleConnections()).isEqualTo(0);
+        assertThat(pool.getBorrowedConnections()).isEqualTo(0);
+        // totalConnections will naturally reach 0 through closeChannel decrements
+        assertThat(pool.getTotalConnections()).isEqualTo(0);
+    }
+
+    @Test
+    void getBorrowedConnections_tracksAcquiredChannels() throws Exception {
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(mockFuture.isSuccess()).thenReturn(true);
+        when(mockFuture.channel()).thenReturn(channel);
+
+        TimeoutSpec timeoutSpec = new TimeoutSpec();
+        timeoutSpec.setConnectMs(5000);
+        clientSpec.setTimeout(timeoutSpec);
+
+        ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
+
+        assertThat(pool.getBorrowedConnections()).isEqualTo(0);
+
+        // Acquire
+        Channel acquired = pool.acquire();
+        assertThat(pool.getBorrowedConnections()).isEqualTo(1);
+
+        // Release
+        pool.release(acquired);
+        assertThat(pool.getBorrowedConnections()).isEqualTo(0);
+        assertThat(pool.getIdleConnections()).isEqualTo(1);
+
+        pool.close();
+        channel.close();
+    }
+
+    @Test
+    void release_removesBorrowedChannelFromTracking() throws Exception {
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(mockFuture.isSuccess()).thenReturn(true);
+        when(mockFuture.channel()).thenReturn(channel);
+
+        TimeoutSpec timeoutSpec = new TimeoutSpec();
+        timeoutSpec.setConnectMs(5000);
+        clientSpec.setTimeout(timeoutSpec);
+
+        ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
+
+        // Acquire channel
+        Channel acquired = pool.acquire();
+        assertThat(pool.getBorrowedConnections()).isEqualTo(1);
+
+        // Close channel (make unhealthy) and release
+        channel.close();
+        pool.release(acquired);
+
+        // Should be removed from borrowed tracking
+        assertThat(pool.getBorrowedConnections()).isEqualTo(0);
+        // Should not be added to idle (unhealthy)
+        assertThat(pool.getIdleConnections()).isEqualTo(0);
+
+        pool.close();
+    }
+
+    @Test
+    void createChannel_afterPoolClosed_throwsException() throws Exception {
+        // This test verifies that createChannel checks closed state after incrementing counter
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(mockFuture.isSuccess()).thenReturn(true);
+        when(mockFuture.channel()).thenReturn(channel);
+
+        TimeoutSpec timeoutSpec = new TimeoutSpec();
+        timeoutSpec.setConnectMs(5000);
+        clientSpec.setTimeout(timeoutSpec);
+
+        ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
+
+        // Close the pool
+        pool.close();
+
+        // Attempting to acquire should throw exception
+        assertThatThrownBy(pool::acquire)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Connection pool is closed");
+
+        // Counter should not be incremented (or should be rolled back)
+        assertThat(pool.getTotalConnections()).isEqualTo(0);
+
+        channel.close();
+    }
+
+    @Test
+    void createChannel_poolClosedDuringConnection_closesChannelAndThrows() throws Exception {
+        // This test verifies that if pool is closed during connection, the channel is closed
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        // Simulate slow connection
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenAnswer(invocation -> {
+            // Simulate some delay during which pool might be closed
+            Thread.sleep(10);
+            return true;
+        });
+        when(mockFuture.isSuccess()).thenReturn(true);
+        when(mockFuture.channel()).thenReturn(channel);
+
+        TimeoutSpec timeoutSpec = new TimeoutSpec();
+        timeoutSpec.setConnectMs(5000);
+        clientSpec.setTimeout(timeoutSpec);
+
+        ConnectionPool pool = new ConnectionPool(clientSpec, mockBootstrap);
+
+        // Start acquire in another thread
+        Thread acquireThread = new Thread(() -> {
+            try {
+                pool.acquire();
+            } catch (Exception e) {
+                // Expected
+            }
+        });
+        acquireThread.start();
+
+        // Give the acquire thread a chance to start
+        Thread.sleep(5);
+
+        // Close pool while connection is in progress
+        pool.close();
+
+        // Wait for acquire thread to complete
+        acquireThread.join(1000);
+
+        // Channel should be closed (either by close() or by createChannel detecting closed state)
+        assertThat(channel.isOpen()).isFalse();
+    }
+
 }

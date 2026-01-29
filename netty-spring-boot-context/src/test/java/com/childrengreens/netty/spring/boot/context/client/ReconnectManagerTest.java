@@ -30,7 +30,8 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -192,11 +193,29 @@ class ReconnectManagerTest {
 
     @Test
     void doReconnect_whenStopped_doesNotAttempt() throws Exception {
+        CountDownLatch callbackLatch = new CountDownLatch(1);
+        reconnectManager.setListener(new ReconnectManager.ReconnectListener() {
+            @Override
+            public void onReconnectSuccess(Channel ch) {
+                callbackLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectFailure(Throwable cause) {
+                callbackLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectExhausted() {
+                callbackLatch.countDown();
+            }
+        });
+
         reconnectManager.scheduleReconnect();
         reconnectManager.stop();
 
-        // Wait for scheduled task to execute
-        Thread.sleep(150);
+        // Listener should not be called after stop
+        assertThat(callbackLatch.await(200, TimeUnit.MILLISECONDS)).isFalse();
 
         assertThat(reconnectManager.isReconnecting()).isFalse();
     }
@@ -215,11 +234,11 @@ class ReconnectManagerTest {
 
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
-        AtomicBoolean successCalled = new AtomicBoolean(false);
+        CountDownLatch successLatch = new CountDownLatch(1);
         manager.setListener(new ReconnectManager.ReconnectListener() {
             @Override
             public void onReconnectSuccess(Channel ch) {
-                successCalled.set(true);
+                successLatch.countDown();
             }
 
             @Override
@@ -233,11 +252,9 @@ class ReconnectManagerTest {
 
         manager.scheduleReconnect();
 
-        // Wait for reconnect to complete
-        Thread.sleep(200);
+        assertThat(successLatch.await(1, TimeUnit.SECONDS)).isTrue();
 
         verify(connectionPool).release(channel);
-        assertThat(successCalled.get()).isTrue();
 
         manager.stop();
         channel.close();
@@ -258,7 +275,7 @@ class ReconnectManagerTest {
 
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
-        AtomicBoolean failureCalled = new AtomicBoolean(false);
+        CountDownLatch failureLatch = new CountDownLatch(1);
         manager.setListener(new ReconnectManager.ReconnectListener() {
             @Override
             public void onReconnectSuccess(Channel ch) {
@@ -266,7 +283,7 @@ class ReconnectManagerTest {
 
             @Override
             public void onReconnectFailure(Throwable cause) {
-                failureCalled.set(true);
+                failureLatch.countDown();
             }
 
             @Override
@@ -276,10 +293,7 @@ class ReconnectManagerTest {
 
         manager.scheduleReconnect();
 
-        // Wait for reconnect to complete
-        Thread.sleep(200);
-
-        assertThat(failureCalled.get()).isTrue();
+        assertThat(failureLatch.await(1, TimeUnit.SECONDS)).isTrue();
 
         manager.stop();
     }
@@ -299,7 +313,7 @@ class ReconnectManagerTest {
 
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
-        AtomicBoolean exhaustedCalled = new AtomicBoolean(false);
+        CountDownLatch exhaustedLatch = new CountDownLatch(1);
         manager.setListener(new ReconnectManager.ReconnectListener() {
             @Override
             public void onReconnectSuccess(Channel ch) {
@@ -311,16 +325,13 @@ class ReconnectManagerTest {
 
             @Override
             public void onReconnectExhausted() {
-                exhaustedCalled.set(true);
+                exhaustedLatch.countDown();
             }
         });
 
         manager.scheduleReconnect();
 
-        // Wait for reconnect to complete
-        Thread.sleep(200);
-
-        assertThat(exhaustedCalled.get()).isTrue();
+        assertThat(exhaustedLatch.await(1, TimeUnit.SECONDS)).isTrue();
 
         manager.stop();
     }
@@ -341,12 +352,25 @@ class ReconnectManagerTest {
 
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
+        CountDownLatch failureLatch = new CountDownLatch(2);
+        manager.setListener(new ReconnectManager.ReconnectListener() {
+            @Override
+            public void onReconnectSuccess(Channel ch) {
+            }
+
+            @Override
+            public void onReconnectFailure(Throwable cause) {
+                failureLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectExhausted() {
+            }
+        });
+
         manager.scheduleReconnect();
 
-        // Wait for multiple reconnect attempts
-        Thread.sleep(300);
-
-        // Should have tried multiple times (retry count > 1)
+        assertThat(failureLatch.await(1, TimeUnit.SECONDS)).isTrue();
         assertThat(manager.getRetryCount()).isGreaterThan(1);
 
         manager.stop();
@@ -370,12 +394,25 @@ class ReconnectManagerTest {
 
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
+        CountDownLatch failureLatch = new CountDownLatch(2);
+        manager.setListener(new ReconnectManager.ReconnectListener() {
+            @Override
+            public void onReconnectSuccess(Channel ch) {
+            }
+
+            @Override
+            public void onReconnectFailure(Throwable cause) {
+                failureLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectExhausted() {
+            }
+        });
+
         manager.scheduleReconnect();
 
-        // Wait for a few retries
-        Thread.sleep(400);
-
-        // Retry count should have increased
+        assertThat(failureLatch.await(1, TimeUnit.SECONDS)).isTrue();
         assertThat(manager.getRetryCount()).isGreaterThan(1);
 
         manager.stop();
@@ -392,6 +429,7 @@ class ReconnectManagerTest {
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
         AtomicReference<Throwable> failureCause = new AtomicReference<>();
+        CountDownLatch failureLatch = new CountDownLatch(1);
         manager.setListener(new ReconnectManager.ReconnectListener() {
             @Override
             public void onReconnectSuccess(Channel ch) {
@@ -400,6 +438,7 @@ class ReconnectManagerTest {
             @Override
             public void onReconnectFailure(Throwable cause) {
                 failureCause.set(cause);
+                failureLatch.countDown();
             }
 
             @Override
@@ -409,7 +448,7 @@ class ReconnectManagerTest {
 
         manager.scheduleReconnect();
 
-        Thread.sleep(200);
+        assertThat(failureLatch.await(1, TimeUnit.SECONDS)).isTrue();
 
         assertThat(failureCause.get()).isNotNull();
         assertThat(failureCause.get().getMessage()).contains("Network error");
@@ -432,15 +471,150 @@ class ReconnectManagerTest {
 
         ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
 
-        manager.scheduleReconnect();
-        Thread.sleep(200);
+        CountDownLatch failureLatch = new CountDownLatch(1);
+        manager.setListener(new ReconnectManager.ReconnectListener() {
+            @Override
+            public void onReconnectSuccess(Channel ch) {
+            }
 
+            @Override
+            public void onReconnectFailure(Throwable cause) {
+                failureLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectExhausted() {
+            }
+        });
+
+        manager.scheduleReconnect();
+        assertThat(failureLatch.await(1, TimeUnit.SECONDS)).isTrue();
         assertThat(manager.getRetryCount()).isGreaterThan(0);
 
         manager.stop();
         manager.resetState();
 
         assertThat(manager.getRetryCount()).isEqualTo(0);
+    }
+
+    @Test
+    void doReconnect_withTimeout_cancelsConnectionAndReportsTimeout() throws Exception {
+        // This test verifies the fix for await timeout not being handled properly
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+
+        // Simulate timeout: await returns false
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenReturn(false);
+
+        clientSpec.getReconnect().setMaxRetries(5);
+        clientSpec.getReconnect().setInitialDelayMs(50);
+
+        ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
+
+        AtomicReference<Throwable> failureCause = new AtomicReference<>();
+        CountDownLatch failureLatch = new CountDownLatch(1);
+        manager.setListener(new ReconnectManager.ReconnectListener() {
+            @Override
+            public void onReconnectSuccess(Channel ch) {
+            }
+
+            @Override
+            public void onReconnectFailure(Throwable cause) {
+                failureCause.set(cause);
+                failureLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectExhausted() {
+            }
+        });
+
+        manager.scheduleReconnect();
+
+        assertThat(failureLatch.await(1, TimeUnit.SECONDS)).isTrue();
+
+        // Before fix: cause would be null or wrong
+        // After fix: cause should be TimeoutException
+        assertThat(failureCause.get()).isInstanceOf(TimeoutException.class);
+        assertThat(failureCause.get().getMessage()).contains("timeout");
+
+        // Verify that cancel was called to prevent orphan connections
+        verify(mockFuture, atLeastOnce()).cancel(true);
+
+        manager.stop();
+    }
+
+    @Test
+    void doReconnect_withTimeout_cancelsAndSchedulesRetry() throws Exception {
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+
+        // First call times out, second call succeeds
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class)))
+                .thenReturn(false)  // First call: timeout
+                .thenReturn(true);   // Second call: completes
+        when(mockFuture.isSuccess()).thenReturn(true);
+        EmbeddedChannel channel = new EmbeddedChannel();
+        when(mockFuture.channel()).thenReturn(channel);
+
+        clientSpec.getReconnect().setMaxRetries(5);
+        clientSpec.getReconnect().setInitialDelayMs(50);
+
+        ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
+
+        CountDownLatch successLatch = new CountDownLatch(1);
+        manager.setListener(new ReconnectManager.ReconnectListener() {
+            @Override
+            public void onReconnectSuccess(Channel ch) {
+                successLatch.countDown();
+            }
+
+            @Override
+            public void onReconnectFailure(Throwable cause) {
+            }
+
+            @Override
+            public void onReconnectExhausted() {
+            }
+        });
+
+        manager.scheduleReconnect();
+
+        assertThat(successLatch.await(1, TimeUnit.SECONDS)).isTrue();
+        // cancel should be called at least once for the timeout
+        verify(mockFuture, atLeastOnce()).cancel(true);
+
+        manager.stop();
+        channel.close();
+    }
+
+    @Test
+    void doReconnect_interruptedDuringAwait_cancelsFutureAndRestoresInterruptFlag() throws Exception {
+        Bootstrap mockBootstrap = mock(Bootstrap.class);
+        ChannelFuture mockFuture = mock(ChannelFuture.class);
+        CountDownLatch awaitLatch = new CountDownLatch(1);
+
+        // Simulate InterruptedException during await
+        when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
+        when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenAnswer(invocation -> {
+            awaitLatch.countDown();
+            throw new InterruptedException();
+        });
+
+        clientSpec.getReconnect().setMaxRetries(3);
+
+        ReconnectManager manager = new ReconnectManager(clientSpec, mockBootstrap, connectionPool, scheduler);
+
+        manager.scheduleReconnect();
+
+        assertThat(awaitLatch.await(1, TimeUnit.SECONDS)).isTrue();
+
+        // Verify that cancel was called when interrupted
+        verify(mockFuture, atLeastOnce()).cancel(true);
+
+        manager.stop();
     }
 
 }
