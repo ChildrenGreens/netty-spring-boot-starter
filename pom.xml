@@ -6,7 +6,7 @@
 
     <groupId>com.childrengreens</groupId>
     <artifactId>netty-spring-boot</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <name>Netty Spring Boot</name>
@@ -28,6 +28,9 @@
     </modules>
 
     <properties>
+        <!-- Project version -->
+        <revision>0.0.1-SNAPSHOT</revision>
+
         <java.version>17</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
@@ -45,6 +48,9 @@
         <!-- JaCoCo coverage threshold -->
         <jacoco.line.coverage>0.45</jacoco.line.coverage>
         <jacoco.branch.coverage>0.35</jacoco.branch.coverage>
+
+        <!-- Test dependencies -->
+        <bouncycastle.version>1.83</bouncycastle.version>
     </properties>
 
     <dependencyManagement>
@@ -62,22 +68,29 @@
             <dependency>
                 <groupId>com.childrengreens</groupId>
                 <artifactId>netty-spring-boot-context</artifactId>
-                <version>${project.version}</version>
+                <version>${revision}</version>
             </dependency>
             <dependency>
                 <groupId>com.childrengreens</groupId>
                 <artifactId>netty-spring-boot-actuator</artifactId>
-                <version>${project.version}</version>
+                <version>${revision}</version>
             </dependency>
             <dependency>
                 <groupId>com.childrengreens</groupId>
                 <artifactId>netty-spring-boot-autoconfigure</artifactId>
-                <version>${project.version}</version>
+                <version>${revision}</version>
             </dependency>
             <dependency>
                 <groupId>com.childrengreens</groupId>
                 <artifactId>netty-spring-boot-starter</artifactId>
-                <version>${project.version}</version>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- BouncyCastle for SSL certificate generation in tests -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

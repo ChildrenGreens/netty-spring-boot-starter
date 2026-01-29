@@ -31,13 +31,14 @@ import java.util.List;
  *
  * <p>Example configuration:
  * <pre>{@code
- * netty:
- *   enabled: true
- *   servers:
- *     - name: tcp-server
- *       transport: TCP
- *       port: 9000
- *       profile: tcp-lengthfield-json
+ * spring:
+ *   netty:
+ *     enabled: true
+ *     servers:
+ *       - name: tcp-server
+ *         transport: TCP
+ *         port: 9000
+ *         profile: tcp-lengthfield-json
  * }</pre>
  *
  * @author Netty Spring Boot
@@ -45,7 +46,7 @@ import java.util.List;
  * @see ServerSpec
  * @see DefaultsSpec
  */
-@ConfigurationProperties(prefix = "netty")
+@ConfigurationProperties(prefix = "spring.netty")
 public class NettyProperties {
 
     /**

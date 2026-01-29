@@ -20,9 +20,21 @@ import com.childrengreens.netty.spring.boot.context.properties.TransportImpl;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollServerSocketChannel;
+import io.netty.channel.epoll.EpollSocketChannel;
+import io.netty.channel.kqueue.KQueue;
+import io.netty.channel.kqueue.KQueueEventLoopGroup;
+import io.netty.channel.kqueue.KQueueServerSocketChannel;
+import io.netty.channel.kqueue.KQueueSocketChannel;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Tests for {@link TransportFactory}.
@@ -143,6 +155,180 @@ class TransportFactoryTest {
         EventLoopGroup group = factory.createWorkerGroup(0);
 
         assertThat(group).isNotNull();
+        group.shutdownGracefully();
+    }
+
+    // ==================== KQUEUE-specific tests (macOS/BSD) ====================
+
+    @Test
+    void constructor_withKqueue_whenAvailable_usesKqueue() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+
+        assertThat(factory.getResolvedTransport()).isEqualTo(TransportImpl.KQUEUE);
+    }
+
+    @Test
+    void createBossGroup_withKqueue_createsKQueueEventLoopGroup() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+        EventLoopGroup group = factory.createBossGroup(1);
+
+        assertThat(group).isInstanceOf(KQueueEventLoopGroup.class);
+        group.shutdownGracefully();
+    }
+
+    @Test
+    void createWorkerGroup_withKqueue_createsKQueueEventLoopGroup() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+        EventLoopGroup group = factory.createWorkerGroup(2);
+
+        assertThat(group).isInstanceOf(KQueueEventLoopGroup.class);
+        group.shutdownGracefully();
+    }
+
+    @Test
+    void getServerChannelClass_withKqueue_returnsKQueueServerSocketChannel() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+
+        assertThat(factory.getServerChannelClass()).isEqualTo(KQueueServerSocketChannel.class);
+    }
+
+    @Test
+    void getClientChannelClass_withKqueue_returnsKQueueSocketChannel() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+
+        assertThat(factory.getClientChannelClass()).isEqualTo(KQueueSocketChannel.class);
+    }
+
+    // ==================== EPOLL-specific tests (Linux) ====================
+
+    @Test
+    void constructor_withEpoll_whenAvailable_usesEpoll() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+
+        assertThat(factory.getResolvedTransport()).isEqualTo(TransportImpl.EPOLL);
+    }
+
+    @Test
+    void createBossGroup_withEpoll_createsEpollEventLoopGroup() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+        EventLoopGroup group = factory.createBossGroup(1);
+
+        assertThat(group).isInstanceOf(EpollEventLoopGroup.class);
+        group.shutdownGracefully();
+    }
+
+    @Test
+    void createWorkerGroup_withEpoll_createsEpollEventLoopGroup() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+        EventLoopGroup group = factory.createWorkerGroup(2);
+
+        assertThat(group).isInstanceOf(EpollEventLoopGroup.class);
+        group.shutdownGracefully();
+    }
+
+    @Test
+    void getServerChannelClass_withEpoll_returnsEpollServerSocketChannel() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+
+        assertThat(factory.getServerChannelClass()).isEqualTo(EpollServerSocketChannel.class);
+    }
+
+    @Test
+    void getClientChannelClass_withEpoll_returnsEpollSocketChannel() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+
+        assertThat(factory.getClientChannelClass()).isEqualTo(EpollSocketChannel.class);
+    }
+
+    // ==================== NIO-specific tests ====================
+
+    @Test
+    void createBossGroup_withNio_createsNioEventLoopGroup() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+        EventLoopGroup group = factory.createBossGroup(1);
+
+        assertThat(group).isInstanceOf(NioEventLoopGroup.class);
+        group.shutdownGracefully();
+    }
+
+    @Test
+    void createWorkerGroup_withNio_createsNioEventLoopGroup() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+        EventLoopGroup group = factory.createWorkerGroup(2);
+
+        assertThat(group).isInstanceOf(NioEventLoopGroup.class);
+        group.shutdownGracefully();
+    }
+
+    @Test
+    void getServerChannelClass_withNio_returnsNioServerSocketChannel() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+
+        assertThat(factory.getServerChannelClass()).isEqualTo(NioServerSocketChannel.class);
+    }
+
+    @Test
+    void getClientChannelClass_withNio_returnsNioSocketChannel() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+
+        assertThat(factory.getClientChannelClass()).isEqualTo(NioSocketChannel.class);
+    }
+
+    // ==================== AUTO resolution tests ====================
+
+    @Test
+    void constructor_withAuto_onKqueuePlatform_resolvesToKqueue() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+        assumeTrue(!Epoll.isAvailable(), "Epoll available, test is for KQueue-only platforms");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.AUTO);
+
+        assertThat(factory.getResolvedTransport()).isEqualTo(TransportImpl.KQUEUE);
+    }
+
+    @Test
+    void constructor_withAuto_onEpollPlatform_resolvesToEpoll() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.AUTO);
+
+        // EPOLL takes priority over KQUEUE in AUTO mode
+        assertThat(factory.getResolvedTransport()).isEqualTo(TransportImpl.EPOLL);
+    }
+
+    @Test
+    void constructor_withAuto_createsCorrectEventLoopGroup() {
+        TransportFactory factory = new TransportFactory(TransportImpl.AUTO);
+        EventLoopGroup group = factory.createBossGroup(1);
+
+        TransportImpl resolved = factory.getResolvedTransport();
+        if (resolved == TransportImpl.EPOLL) {
+            assertThat(group).isInstanceOf(EpollEventLoopGroup.class);
+        } else if (resolved == TransportImpl.KQUEUE) {
+            assertThat(group).isInstanceOf(KQueueEventLoopGroup.class);
+        } else {
+            assertThat(group).isInstanceOf(NioEventLoopGroup.class);
+        }
         group.shutdownGracefully();
     }
 }

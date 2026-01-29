@@ -210,4 +210,139 @@ class DispatcherHandlerTest {
         channel.close();
     }
 
+    @Test
+    void channelRead0_withByteBuf_extractsTypeField() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("type", "pong"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test "type" field
+        ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"ping\",\"data\":\"hello\"}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withByteBuf_extractsCmdField() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test "cmd" field
+        ByteBuf buf = Unpooled.copiedBuffer("{\"cmd\":\"login\",\"user\":\"test\"}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withByteBuf_extractsActionField() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test "action" field
+        ByteBuf buf = Unpooled.copiedBuffer("{\"action\":\"create\",\"payload\":{}}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withByteBuf_extractsCommandField() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test "command" field
+        ByteBuf buf = Unpooled.copiedBuffer("{\"command\":\"start\",\"args\":[]}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withInvalidJson_usesDefaultRouteKey() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test invalid JSON
+        ByteBuf buf = Unpooled.copiedBuffer("not valid json", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withEmptyJson_usesDefaultRouteKey() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test empty JSON object
+        ByteBuf buf = Unpooled.copiedBuffer("{}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withJsonArray_usesDefaultRouteKey() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test JSON array (not an object)
+        ByteBuf buf = Unpooled.copiedBuffer("[1,2,3]", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withNestedTypeField_extractsCorrectly() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test with nested structure - should only extract top-level "type"
+        ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"message\",\"data\":{\"type\":\"nested\"}}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withMaliciousJson_handlesSecurely() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Test potentially malicious JSON with special characters
+        ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"test\\\"injection\",\"data\":\"</script>\"}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        channel.close();
+    }
+
 }

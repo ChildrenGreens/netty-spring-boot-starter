@@ -24,7 +24,7 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           application.yml                               │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │    netty.servers[*]         │    │    netty.clients[*]             │ │
+│  │ spring.netty.servers[*]     │    │ spring.netty.clients[*]         │ │
 │  │    服务端配置                 │    │    客户端配置                    │ │
 │  └─────────────────────────────┘    └─────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -95,59 +95,60 @@ netty-spring-boot/
 ### 2. 配置服务器
 
 ```yaml
-netty:
-  enabled: true
-  defaults:
-    threads:
-      boss: 1
-      worker: 0              # 0 = CPU核心数 * 2
-    transport:
-      prefer: AUTO           # AUTO/NIO/EPOLL/KQUEUE
-    shutdown:
-      graceful: true
-      quietPeriodMs: 200
-      timeoutMs: 3000
+spring:
+  netty:
+    enabled: true
+    defaults:
+      threads:
+        boss: 1
+        worker: 0              # 0 = CPU核心数 * 2
+      transport:
+        prefer: AUTO           # AUTO/NIO/EPOLL/KQUEUE
+      shutdown:
+        graceful: true
+        quietPeriodMs: 200
+        timeoutMs: 3000
 
-  servers:
-    - name: tcp-server
-      transport: TCP
-      host: 0.0.0.0
-      port: 9000
-      profile: tcp-lengthfield-json
-      routing:
-        mode: MESSAGE_TYPE   # 按消息类型路由
-      features:
-        idle:
-          enabled: true
-          readSeconds: 60
-        logging:
-          enabled: true
-          level: DEBUG
+    servers:
+      - name: tcp-server
+        transport: TCP
+        host: 0.0.0.0
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE   # 按消息类型路由
+        features:
+          idle:
+            enabled: true
+            readSeconds: 60
+          logging:
+            enabled: true
+            level: DEBUG
 
-    - name: http-server
-      transport: HTTP
-      port: 8080
-      profile: http1-json
-      routing:
-        mode: PATH           # 按路径路由
+      - name: http-server
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH           # 按路径路由
 
-    - name: ws-server
-      transport: HTTP
-      port: 8081
-      profile: websocket
-      routing:
-        mode: WS_PATH
+      - name: ws-server
+        transport: HTTP
+        port: 8081
+        profile: websocket
+        routing:
+          mode: WS_PATH
 
-    - name: udp-server
-      transport: UDP
-      port: 7000
-      profile: udp-json
-      routing:
-        mode: MESSAGE_TYPE
+      - name: udp-server
+        transport: UDP
+        port: 7000
+        profile: udp-json
+        routing:
+          mode: MESSAGE_TYPE
 
-  observability:
-    metrics: true
-    health: true
+    observability:
+      metrics: true
+      health: true
 ```
 
 ### 3. 编写处理器
@@ -241,31 +242,32 @@ public class WebSocketHandler {
 ### 1. 配置客户端
 
 ```yaml
-netty:
-  clients:
-    - name: order-service
-      host: 127.0.0.1
-      port: 9000
-      profile: tcp-lengthfield-json
-      pool:
-        maxConnections: 10
-        minIdle: 2
-        maxIdleMs: 60000
-        acquireTimeoutMs: 5000
-      reconnect:
-        enabled: true
-        initialDelayMs: 1000
-        maxDelayMs: 30000
-        multiplier: 2.0
-        maxRetries: -1             # -1 = 无限重试
-      heartbeat:
-        enabled: true
-        intervalMs: 30000
-        timeoutMs: 5000
-        message: '{"type":"heartbeat"}'
-      timeout:
-        connectMs: 5000
-        requestMs: 10000
+spring:
+  netty:
+    clients:
+      - name: order-service
+        host: 127.0.0.1
+        port: 9000
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 10
+          minIdle: 2
+          maxIdleMs: 60000
+          acquireTimeoutMs: 5000
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 30000
+          multiplier: 2.0
+          maxRetries: -1             # -1 = 无限重试
+        heartbeat:
+          enabled: true
+          intervalMs: 30000
+          timeoutMs: 5000
+          message: '{"type":"heartbeat"}'
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
 ```
 
 ### 2. 定义客户端接口
@@ -346,38 +348,39 @@ public class OrderService {
 ## Feature（能力组件）配置
 
 ```yaml
-netty:
-  servers:
-    - name: my-server
-      features:
-        # SSL/TLS 加密
-        ssl:
-          enabled: true
-          certPath: /path/to/cert.pem
-          keyPath: /path/to/key.pem
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          # SSL/TLS 加密
+          ssl:
+            enabled: true
+            certPath: /path/to/cert.pem
+            keyPath: /path/to/key.pem
 
-        # 空闲检测
-        idle:
-          enabled: true
-          readSeconds: 60
-          writeSeconds: 30
-          allSeconds: 0
+          # 空闲检测
+          idle:
+            enabled: true
+            readSeconds: 60
+            writeSeconds: 30
+            allSeconds: 0
 
-        # 日志记录
-        logging:
-          enabled: true
-          level: DEBUG
+          # 日志记录
+          logging:
+            enabled: true
+            level: DEBUG
 
-        # 限流（令牌桶算法）
-        rateLimit:
-          enabled: true
-          requestsPerSecond: 100
-          burstSize: 150
+          # 限流（令牌桶算法）
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 100
+            burstSize: 150
 
-        # 连接数限制
-        connectionLimit:
-          enabled: true
-          maxConnections: 10000
+          # 连接数限制
+          connectionLimit:
+            enabled: true
+            maxConnections: 10000
 ```
 
 ## 扩展点

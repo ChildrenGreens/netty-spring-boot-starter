@@ -80,45 +80,67 @@ public class RateLimitFeatureProvider implements FeatureProvider {
 
     /**
      * Channel handler that implements token bucket rate limiting.
+     *
+     * <p>This implementation is thread-safe using CAS (Compare-And-Swap) operations
+     * to handle concurrent access to the token bucket.
      */
     private static class RateLimitHandler extends ChannelInboundHandlerAdapter {
 
         private final double requestsPerSecond;
         private final int burstSize;
         private final AtomicLong tokens;
-        private volatile long lastRefillTime;
+        private final AtomicLong lastRefillTime;
 
         RateLimitHandler(double requestsPerSecond, int burstSize) {
             this.requestsPerSecond = requestsPerSecond;
             this.burstSize = burstSize > 0 ? burstSize : (int) Math.max(1, requestsPerSecond);
             this.tokens = new AtomicLong(this.burstSize);
-            this.lastRefillTime = System.nanoTime();
+            this.lastRefillTime = new AtomicLong(System.nanoTime());
         }
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             refillTokens();
 
-            if (tokens.get() > 0) {
-                tokens.decrementAndGet();
-                super.channelRead(ctx, msg);
-            } else {
-                logger.warn("Rate limit exceeded for channel: {}", ctx.channel().remoteAddress());
-                // Optionally close or send error response
-                ctx.close();
+            // Use CAS to atomically check and consume token
+            long currentTokens = tokens.get();
+            while (currentTokens > 0) {
+                if (tokens.compareAndSet(currentTokens, currentTokens - 1)) {
+                    // Successfully consumed a token
+                    super.channelRead(ctx, msg);
+                    return;
+                }
+                // CAS failed, retry with updated value
+                currentTokens = tokens.get();
             }
+
+            // No tokens available
+            logger.warn("Rate limit exceeded for channel: {}", ctx.channel().remoteAddress());
+            ctx.close();
         }
 
+        /**
+         * Refill tokens based on elapsed time using CAS for thread safety.
+         */
         private void refillTokens() {
             long now = System.nanoTime();
-            long elapsed = now - lastRefillTime;
-            long tokensToAdd = (long) (elapsed * requestsPerSecond / 1_000_000_000L);
+            long currentTime;
+            long tokensToAdd;
 
-            if (tokensToAdd > 0) {
-                lastRefillTime = now;
-                long newTokens = Math.min(burstSize, tokens.get() + tokensToAdd);
-                tokens.set(newTokens);
-            }
+            // CAS loop for updating lastRefillTime
+            do {
+                currentTime = lastRefillTime.get();
+                long elapsed = now - currentTime;
+                tokensToAdd = (long) (elapsed * requestsPerSecond / 1_000_000_000L);
+
+                if (tokensToAdd <= 0) {
+                    return; // No tokens to add
+                }
+            } while (!lastRefillTime.compareAndSet(currentTime, now));
+
+            // Atomically update tokens, capped at burstSize
+            final long addedTokens = tokensToAdd;
+            tokens.updateAndGet(current -> Math.min(burstSize, current + addedTokens));
         }
     }
 

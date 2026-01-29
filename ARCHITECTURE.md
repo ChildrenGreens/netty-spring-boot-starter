@@ -16,7 +16,7 @@ netty-spring-boot/
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           application.yml                               │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │    netty.servers[*]         │    │    netty.clients[*]             │ │
+│  │ spring.netty.servers[*]      │    │ spring.netty.clients[*]         │ │
 │  │    Server Configuration     │    │    Client Configuration         │ │
 │  └─────────────────────────────┘    └─────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -318,73 +318,74 @@ Built-in features: `ssl`, `idle`, `logging`, `rateLimit`, `connectionLimit`
 ### Full Example
 
 ```yaml
-netty:
-  enabled: true
+spring:
+  netty:
+    enabled: true
 
-  defaults:
-    threads:
-      boss: 1
-      worker: 0                    # 0 = CPU cores * 2
-    transport:
-      prefer: AUTO                 # AUTO/NIO/EPOLL/KQUEUE
-    shutdown:
-      graceful: true
-      quietPeriodMs: 200
-      timeoutMs: 3000
+    defaults:
+      threads:
+        boss: 1
+        worker: 0                    # 0 = CPU cores * 2
+      transport:
+        prefer: AUTO                 # AUTO/NIO/EPOLL/KQUEUE
+      shutdown:
+        graceful: true
+        quietPeriodMs: 200
+        timeoutMs: 3000
 
-  # Server configuration
-  servers:
-    - name: tcp-server
-      transport: TCP
-      host: 0.0.0.0
-      port: 9000
-      profile: tcp-lengthfield-json
-      routing:
-        mode: MESSAGE_TYPE
-      features:
-        idle:
+    # Server configuration
+    servers:
+      - name: tcp-server
+        transport: TCP
+        host: 0.0.0.0
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
+        features:
+          idle:
+            enabled: true
+            readSeconds: 60
+          logging:
+            enabled: true
+            level: DEBUG
+
+      - name: http-server
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH
+
+    # Client configuration
+    clients:
+      - name: order-service
+        host: 127.0.0.1
+        port: 9000
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 10
+          minIdle: 2
+          maxIdleMs: 60000
+          acquireTimeoutMs: 5000
+        reconnect:
           enabled: true
-          readSeconds: 60
-        logging:
+          initialDelayMs: 1000
+          maxDelayMs: 30000
+          multiplier: 2.0
+          maxRetries: -1             # -1 = infinite
+        heartbeat:
           enabled: true
-          level: DEBUG
+          intervalMs: 30000
+          timeoutMs: 5000
+          message: '{"type":"heartbeat"}'
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
 
-    - name: http-server
-      transport: HTTP
-      port: 8080
-      profile: http1-json
-      routing:
-        mode: PATH
-
-  # Client configuration
-  clients:
-    - name: order-service
-      host: 127.0.0.1
-      port: 9000
-      profile: tcp-lengthfield-json
-      pool:
-        maxConnections: 10
-        minIdle: 2
-        maxIdleMs: 60000
-        acquireTimeoutMs: 5000
-      reconnect:
-        enabled: true
-        initialDelayMs: 1000
-        maxDelayMs: 30000
-        multiplier: 2.0
-        maxRetries: -1             # -1 = infinite
-      heartbeat:
-        enabled: true
-        intervalMs: 30000
-        timeoutMs: 5000
-        message: '{"type":"heartbeat"}'
-      timeout:
-        connectMs: 5000
-        requestMs: 10000
-
-  observability:
-    metrics: true
-    health: true
+    observability:
+      metrics: true
+      health: true
 ```
 
 ## Usage Examples

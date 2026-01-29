@@ -21,11 +21,14 @@ import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.BeanFactory;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link AnnotationRegistry}.
@@ -38,7 +41,14 @@ class AnnotationRegistryTest {
     @BeforeEach
     void setUp() {
         router = new Router();
-        registry = new AnnotationRegistry(router);
+        registry = new AnnotationRegistry();
+
+        // Mock BeanFactory to provide Router
+        BeanFactory beanFactory = mock(BeanFactory.class);
+        when(beanFactory.getBean(Router.class)).thenReturn(router);
+
+        registry.setBeanFactory(beanFactory);
+        registry.afterPropertiesSet();
     }
 
     @Test

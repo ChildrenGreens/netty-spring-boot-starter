@@ -21,6 +21,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
@@ -48,18 +51,21 @@ import java.lang.reflect.Parameter;
  * @author Netty Spring Boot
  * @since 0.0.1
  */
-public class AnnotationRegistry implements BeanPostProcessor {
+public class AnnotationRegistry implements BeanPostProcessor, BeanFactoryAware, InitializingBean {
 
     private static final Logger logger = LoggerFactory.getLogger(AnnotationRegistry.class);
 
-    private final Router router;
+    private BeanFactory beanFactory;
+    private Router router;
 
-    /**
-     * Create a new AnnotationRegistry.
-     * @param router the router to register routes with
-     */
-    public AnnotationRegistry(Router router) {
-        this.router = router;
+    @Override
+    public void setBeanFactory(@NonNull BeanFactory beanFactory) throws BeansException {
+        this.beanFactory = beanFactory;
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        this.router = beanFactory.getBean(Router.class);
     }
 
     @Override

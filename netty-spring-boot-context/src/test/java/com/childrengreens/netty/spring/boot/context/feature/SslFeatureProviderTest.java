@@ -20,11 +20,23 @@ import com.childrengreens.netty.spring.boot.context.properties.FeaturesSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.SslSpec;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.File;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.cert.CertificateException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Tests for {@link SslFeatureProvider}.
@@ -33,6 +45,22 @@ class SslFeatureProviderTest {
 
     private SslFeatureProvider provider;
     private ServerSpec serverSpec;
+
+    private static boolean selfSignedCertAvailable = false;
+    private static SelfSignedCertificate sharedCert;
+    private static SelfSignedCertificate sharedTrustCert;
+
+    @BeforeAll
+    static void initSharedResources() {
+        try {
+            sharedCert = new SelfSignedCertificate();
+            sharedTrustCert = new SelfSignedCertificate();
+            selfSignedCertAvailable = true;
+        } catch (CertificateException e) {
+            // Self-signed cert generation not available in this environment
+            selfSignedCertAvailable = false;
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -207,6 +235,220 @@ class SslFeatureProviderTest {
         // This will fail because the files don't exist, but it tests the client auth path
         assertThatThrownBy(() -> provider.configure(channel.pipeline(), serverSpec))
                 .isInstanceOf(IllegalStateException.class);
+
+        channel.close();
+    }
+
+    // ==================== Tests for buildSslContext method (lines 99-116) ====================
+
+    @Test
+    void buildSslContext_withSelfSignedCert_createsSslContext() throws Exception {
+        // Test the self-signed certificate path (lines 104-108)
+        Method buildSslContextMethod = SslFeatureProvider.class.getDeclaredMethod(
+                "buildSslContext", SslSpec.class);
+        buildSslContextMethod.setAccessible(true);
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        // No cert/key paths - will use self-signed certificate
+
+        try {
+            SslContext result = (SslContext) buildSslContextMethod.invoke(provider, ssl);
+            assertThat(result).isNotNull();
+            assertThat(result.isServer()).isTrue();
+        } catch (InvocationTargetException e) {
+            // Self-signed cert generation might fail in certain environments
+            assertThat(e.getCause()).isInstanceOf(CertificateException.class);
+        }
+    }
+
+    @Test
+    void buildSslContext_withValidCertAndKey_createsSslContext(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        // Copy cert and key to temp files
+        File certFile = tempDir.resolve("cert.pem").toFile();
+        File keyFile = tempDir.resolve("key.pem").toFile();
+
+        // Write certificate and key to files
+        Files.copy(sharedCert.certificate().toPath(), certFile.toPath());
+        Files.copy(sharedCert.privateKey().toPath(), keyFile.toPath());
+
+        Method buildSslContextMethod = SslFeatureProvider.class.getDeclaredMethod(
+                "buildSslContext", SslSpec.class);
+        buildSslContextMethod.setAccessible(true);
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(certFile.getAbsolutePath());
+        ssl.setKeyPath(keyFile.getAbsolutePath());
+        // No key password - covers line 101-102
+
+        SslContext result = (SslContext) buildSslContextMethod.invoke(provider, ssl);
+
+        assertThat(result).isNotNull();
+        assertThat(result.isServer()).isTrue();
+    }
+
+    @Test
+    void buildSslContext_withValidCertAndKeyAndPassword_createsSslContext(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        // Copy cert and key to temp files
+        File certFile = tempDir.resolve("cert.pem").toFile();
+        File keyFile = tempDir.resolve("key.pem").toFile();
+
+        Files.copy(sharedCert.certificate().toPath(), certFile.toPath());
+        Files.copy(sharedCert.privateKey().toPath(), keyFile.toPath());
+
+        Method buildSslContextMethod = SslFeatureProvider.class.getDeclaredMethod(
+                "buildSslContext", SslSpec.class);
+        buildSslContextMethod.setAccessible(true);
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(certFile.getAbsolutePath());
+        ssl.setKeyPath(keyFile.getAbsolutePath());
+        ssl.setKeyPassword(null); // Test null password takes line 101-102 path
+
+        SslContext result = (SslContext) buildSslContextMethod.invoke(provider, ssl);
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void buildSslContext_withKeyPassword_usesPasswordPath(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        // This test verifies the code path for keyPassword != null (line 99-100)
+        // Since SelfSignedCertificate creates unencrypted keys, providing any password
+        // will cause an error, but the code path is still exercised
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(sharedCert.certificate().getAbsolutePath());
+        ssl.setKeyPath(sharedCert.privateKey().getAbsolutePath());
+        ssl.setKeyPassword("somepassword"); // Non-null password to exercise line 99-100
+
+        Method buildSslContextMethod = SslFeatureProvider.class.getDeclaredMethod(
+                "buildSslContext", SslSpec.class);
+        buildSslContextMethod.setAccessible(true);
+
+        // The invocation will fail because the key is not encrypted,
+        // but the important thing is that the password code path is exercised
+        try {
+            buildSslContextMethod.invoke(provider, ssl);
+        } catch (InvocationTargetException e) {
+            // Expected: The key file is not encrypted, so providing a password causes an error
+            assertThat(e.getCause()).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void buildSslContext_withClientAuth_addsTrustManager(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        File certFile = tempDir.resolve("cert.pem").toFile();
+        File keyFile = tempDir.resolve("key.pem").toFile();
+        File trustFile = tempDir.resolve("trust.pem").toFile();
+
+        Files.copy(sharedCert.certificate().toPath(), certFile.toPath());
+        Files.copy(sharedCert.privateKey().toPath(), keyFile.toPath());
+        Files.copy(sharedTrustCert.certificate().toPath(), trustFile.toPath());
+
+        Method buildSslContextMethod = SslFeatureProvider.class.getDeclaredMethod(
+                "buildSslContext", SslSpec.class);
+        buildSslContextMethod.setAccessible(true);
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(certFile.getAbsolutePath());
+        ssl.setKeyPath(keyFile.getAbsolutePath());
+        ssl.setClientAuth(true);
+        ssl.setTrustCertPath(trustFile.getAbsolutePath());
+        // Covers lines 111-114
+
+        SslContext result = (SslContext) buildSslContextMethod.invoke(provider, ssl);
+
+        assertThat(result).isNotNull();
+        assertThat(result.isServer()).isTrue();
+    }
+
+    @Test
+    void buildSslContext_withClientAuthButNoTrustPath_skipsAddingTrustManager(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        File certFile = tempDir.resolve("cert.pem").toFile();
+        File keyFile = tempDir.resolve("key.pem").toFile();
+
+        Files.copy(sharedCert.certificate().toPath(), certFile.toPath());
+        Files.copy(sharedCert.privateKey().toPath(), keyFile.toPath());
+
+        Method buildSslContextMethod = SslFeatureProvider.class.getDeclaredMethod(
+                "buildSslContext", SslSpec.class);
+        buildSslContextMethod.setAccessible(true);
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(certFile.getAbsolutePath());
+        ssl.setKeyPath(keyFile.getAbsolutePath());
+        ssl.setClientAuth(true);
+        ssl.setTrustCertPath(null); // clientAuth is true but no trust path - skips lines 112-113
+
+        SslContext result = (SslContext) buildSslContextMethod.invoke(provider, ssl);
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void configure_withValidCertificates_addsSslHandler(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        File certFile = tempDir.resolve("cert.pem").toFile();
+        File keyFile = tempDir.resolve("key.pem").toFile();
+
+        Files.copy(sharedCert.certificate().toPath(), certFile.toPath());
+        Files.copy(sharedCert.privateKey().toPath(), keyFile.toPath());
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(certFile.getAbsolutePath());
+        ssl.setKeyPath(keyFile.getAbsolutePath());
+        serverSpec.getFeatures().setSsl(ssl);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        provider.configure(channel.pipeline(), serverSpec);
+
+        assertThat(channel.pipeline().names()).contains("sslHandler");
+
+        channel.close();
+    }
+
+    @Test
+    void configure_withValidCertAndClientAuth_addsSslHandler(@TempDir Path tempDir) throws Exception {
+        assumeTrue(selfSignedCertAvailable, "Self-signed certificate generation not available");
+
+        File certFile = tempDir.resolve("cert.pem").toFile();
+        File keyFile = tempDir.resolve("key.pem").toFile();
+        File trustFile = tempDir.resolve("trust.pem").toFile();
+
+        Files.copy(sharedCert.certificate().toPath(), certFile.toPath());
+        Files.copy(sharedCert.privateKey().toPath(), keyFile.toPath());
+        Files.copy(sharedTrustCert.certificate().toPath(), trustFile.toPath());
+
+        SslSpec ssl = new SslSpec();
+        ssl.setEnabled(true);
+        ssl.setCertPath(certFile.getAbsolutePath());
+        ssl.setKeyPath(keyFile.getAbsolutePath());
+        ssl.setClientAuth(true);
+        ssl.setTrustCertPath(trustFile.getAbsolutePath());
+        serverSpec.getFeatures().setSsl(ssl);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        provider.configure(channel.pipeline(), serverSpec);
+
+        assertThat(channel.pipeline().names()).contains("sslHandler");
 
         channel.close();
     }

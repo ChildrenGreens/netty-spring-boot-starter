@@ -1,0 +1,346 @@
+{
+  "properties": [
+    {
+      "name": "spring.netty.servers[].name",
+      "type": "java.lang.String",
+      "description": "Unique name for the server instance."
+    },
+    {
+      "name": "spring.netty.servers[].transport",
+      "type": "com.childrengreens.netty.spring.boot.context.properties.TransportType",
+      "description": "Transport protocol type (TCP, UDP, HTTP)."
+    },
+    {
+      "name": "spring.netty.servers[].host",
+      "type": "java.lang.String",
+      "description": "Host address to bind to.",
+      "defaultValue": "0.0.0.0"
+    },
+    {
+      "name": "spring.netty.servers[].port",
+      "type": "java.lang.Integer",
+      "description": "Port number to listen on."
+    },
+    {
+      "name": "spring.netty.servers[].profile",
+      "type": "java.lang.String",
+      "description": "Protocol profile name (e.g., tcp-lengthfield-json, http1-json, websocket)."
+    },
+    {
+      "name": "spring.netty.servers[].routing.mode",
+      "type": "com.childrengreens.netty.spring.boot.context.properties.RoutingMode",
+      "description": "Routing mode for message dispatching."
+    },
+    {
+      "name": "spring.netty.servers[].features.ssl.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether SSL/TLS is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.netty.servers[].features.ssl.cert-path",
+      "type": "java.lang.String",
+      "description": "Path to the SSL certificate file."
+    },
+    {
+      "name": "spring.netty.servers[].features.ssl.key-path",
+      "type": "java.lang.String",
+      "description": "Path to the SSL private key file."
+    },
+    {
+      "name": "spring.netty.servers[].features.idle.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether idle detection is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.netty.servers[].features.idle.read-seconds",
+      "type": "java.lang.Integer",
+      "description": "Read idle timeout in seconds.",
+      "defaultValue": 0
+    },
+    {
+      "name": "spring.netty.servers[].features.idle.write-seconds",
+      "type": "java.lang.Integer",
+      "description": "Write idle timeout in seconds.",
+      "defaultValue": 0
+    },
+    {
+      "name": "spring.netty.servers[].features.idle.all-seconds",
+      "type": "java.lang.Integer",
+      "description": "All idle timeout in seconds.",
+      "defaultValue": 0
+    },
+    {
+      "name": "spring.netty.servers[].features.logging.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether logging is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.netty.servers[].features.logging.level",
+      "type": "java.lang.String",
+      "description": "Logging level (TRACE, DEBUG, INFO, WARN, ERROR).",
+      "defaultValue": "DEBUG"
+    },
+    {
+      "name": "spring.netty.servers[].features.rate-limit.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether rate limiting is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.netty.servers[].features.rate-limit.requests-per-second",
+      "type": "java.lang.Double",
+      "description": "Maximum requests per second.",
+      "defaultValue": 100.0
+    },
+    {
+      "name": "spring.netty.servers[].features.rate-limit.burst-size",
+      "type": "java.lang.Integer",
+      "description": "Maximum burst size for rate limiting.",
+      "defaultValue": 100
+    },
+    {
+      "name": "spring.netty.servers[].features.connection-limit.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether connection limit is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.netty.servers[].features.connection-limit.max-connections",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of concurrent connections.",
+      "defaultValue": 10000
+    },
+    {
+      "name": "spring.netty.clients[].name",
+      "type": "java.lang.String",
+      "description": "Unique name for the client instance."
+    },
+    {
+      "name": "spring.netty.clients[].host",
+      "type": "java.lang.String",
+      "description": "Server host to connect to."
+    },
+    {
+      "name": "spring.netty.clients[].port",
+      "type": "java.lang.Integer",
+      "description": "Server port to connect to."
+    },
+    {
+      "name": "spring.netty.clients[].profile",
+      "type": "java.lang.String",
+      "description": "Protocol profile name for the client."
+    },
+    {
+      "name": "spring.netty.clients[].pool.max-connections",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of connections in the pool.",
+      "defaultValue": 10
+    },
+    {
+      "name": "spring.netty.clients[].pool.min-idle",
+      "type": "java.lang.Integer",
+      "description": "Minimum number of idle connections.",
+      "defaultValue": 1
+    },
+    {
+      "name": "spring.netty.clients[].pool.max-idle-ms",
+      "type": "java.lang.Long",
+      "description": "Maximum idle time in milliseconds.",
+      "defaultValue": 60000
+    },
+    {
+      "name": "spring.netty.clients[].pool.acquire-timeout-ms",
+      "type": "java.lang.Long",
+      "description": "Timeout for acquiring a connection in milliseconds.",
+      "defaultValue": 5000
+    },
+    {
+      "name": "spring.netty.clients[].reconnect.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether auto-reconnect is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "spring.netty.clients[].reconnect.initial-delay-ms",
+      "type": "java.lang.Long",
+      "description": "Initial delay before reconnect in milliseconds.",
+      "defaultValue": 1000
+    },
+    {
+      "name": "spring.netty.clients[].reconnect.max-delay-ms",
+      "type": "java.lang.Long",
+      "description": "Maximum delay between reconnects in milliseconds.",
+      "defaultValue": 30000
+    },
+    {
+      "name": "spring.netty.clients[].reconnect.multiplier",
+      "type": "java.lang.Double",
+      "description": "Multiplier for exponential backoff.",
+      "defaultValue": 2.0
+    },
+    {
+      "name": "spring.netty.clients[].reconnect.max-retries",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of reconnect attempts (-1 for infinite).",
+      "defaultValue": -1
+    },
+    {
+      "name": "spring.netty.clients[].heartbeat.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether heartbeat is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.netty.clients[].heartbeat.interval-ms",
+      "type": "java.lang.Long",
+      "description": "Heartbeat interval in milliseconds.",
+      "defaultValue": 30000
+    },
+    {
+      "name": "spring.netty.clients[].heartbeat.timeout-ms",
+      "type": "java.lang.Long",
+      "description": "Heartbeat timeout in milliseconds.",
+      "defaultValue": 5000
+    },
+    {
+      "name": "spring.netty.clients[].heartbeat.message",
+      "type": "java.lang.String",
+      "description": "Heartbeat message content."
+    },
+    {
+      "name": "spring.netty.clients[].timeout.connect-ms",
+      "type": "java.lang.Long",
+      "description": "Connection timeout in milliseconds.",
+      "defaultValue": 5000
+    },
+    {
+      "name": "spring.netty.clients[].timeout.request-ms",
+      "type": "java.lang.Long",
+      "description": "Request timeout in milliseconds.",
+      "defaultValue": 10000
+    }
+  ],
+  "hints": [
+    {
+      "name": "spring.netty.servers[].transport",
+      "values": [
+        {
+          "value": "TCP",
+          "description": "TCP transport protocol."
+        },
+        {
+          "value": "UDP",
+          "description": "UDP transport protocol."
+        },
+        {
+          "value": "HTTP",
+          "description": "HTTP transport protocol (also used for WebSocket)."
+        }
+      ]
+    },
+    {
+      "name": "spring.netty.servers[].profile",
+      "values": [
+        {
+          "value": "tcp-lengthfield-json",
+          "description": "TCP with 4-byte length prefix and JSON codec."
+        },
+        {
+          "value": "tcp-line",
+          "description": "TCP with line-based framing (CRLF)."
+        },
+        {
+          "value": "tcp-raw",
+          "description": "Raw TCP without framing."
+        },
+        {
+          "value": "http1-json",
+          "description": "HTTP/1.1 with JSON codec."
+        },
+        {
+          "value": "websocket",
+          "description": "WebSocket with JSON codec."
+        },
+        {
+          "value": "udp-json",
+          "description": "UDP datagram with JSON codec."
+        }
+      ]
+    },
+    {
+      "name": "spring.netty.servers[].routing.mode",
+      "values": [
+        {
+          "value": "MESSAGE_TYPE",
+          "description": "Route by message type field."
+        },
+        {
+          "value": "PATH",
+          "description": "Route by HTTP request path."
+        },
+        {
+          "value": "WS_PATH",
+          "description": "Route by WebSocket path."
+        }
+      ]
+    },
+    {
+      "name": "spring.netty.servers[].features.logging.level",
+      "values": [
+        {
+          "value": "TRACE",
+          "description": "Trace level logging."
+        },
+        {
+          "value": "DEBUG",
+          "description": "Debug level logging."
+        },
+        {
+          "value": "INFO",
+          "description": "Info level logging."
+        },
+        {
+          "value": "WARN",
+          "description": "Warn level logging."
+        },
+        {
+          "value": "ERROR",
+          "description": "Error level logging."
+        }
+      ]
+    },
+    {
+      "name": "spring.netty.defaults.transport.prefer",
+      "values": [
+        {
+          "value": "AUTO",
+          "description": "Automatically select the best transport for the platform."
+        },
+        {
+          "value": "NIO",
+          "description": "Use Java NIO transport."
+        },
+        {
+          "value": "EPOLL",
+          "description": "Use Linux EPOLL transport (Linux only)."
+        },
+        {
+          "value": "KQUEUE",
+          "description": "Use BSD KQUEUE transport (macOS/BSD only)."
+        }
+      ]
+    },
+    {
+      "name": "spring.netty.clients[].profile",
+      "values": [
+        {
+          "value": "tcp-lengthfield-json",
+          "description": "TCP with 4-byte length prefix and JSON codec."
+        }
+      ]
+    }
+  ]
+}

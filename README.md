@@ -24,7 +24,7 @@ Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and anno
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           application.yml                               │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │    netty.servers[*]         │    │    netty.clients[*]             │ │
+│  │ spring.netty.servers[*]    │    │ spring.netty.clients[*]         │ │
 │  │    Server Configuration     │    │    Client Configuration         │ │
 │  └─────────────────────────────┘    └─────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -95,29 +95,30 @@ netty-spring-boot/
 ### 2. Configure Servers
 
 ```yaml
-netty:
-  enabled: true
-  defaults:
-    threads:
-      boss: 1
-      worker: 0              # 0 = CPU cores * 2
-    transport:
-      prefer: AUTO           # AUTO/NIO/EPOLL/KQUEUE
-    shutdown:
-      graceful: true
-      quietPeriodMs: 200
-      timeoutMs: 3000
+spring:
+  netty:
+    enabled: true
+    defaults:
+      threads:
+        boss: 1
+        worker: 0              # 0 = CPU cores * 2
+      transport:
+        prefer: AUTO           # AUTO/NIO/EPOLL/KQUEUE
+      shutdown:
+        graceful: true
+        quietPeriodMs: 200
+        timeoutMs: 3000
 
-  servers:
-    - name: tcp-server
-      transport: TCP
-      host: 0.0.0.0
-      port: 9000
-      profile: tcp-lengthfield-json
-      routing:
-        mode: MESSAGE_TYPE
-      features:
-        idle:
+    servers:
+      - name: tcp-server
+        transport: TCP
+        host: 0.0.0.0
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
+        features:
+          idle:
           enabled: true
           readSeconds: 60
         logging:
@@ -241,31 +242,32 @@ public class WebSocketHandler {
 ### 1. Configure Clients
 
 ```yaml
-netty:
-  clients:
-    - name: order-service
-      host: 127.0.0.1
-      port: 9000
-      profile: tcp-lengthfield-json
-      pool:
-        maxConnections: 10
-        minIdle: 2
-        maxIdleMs: 60000
-        acquireTimeoutMs: 5000
-      reconnect:
-        enabled: true
-        initialDelayMs: 1000
-        maxDelayMs: 30000
-        multiplier: 2.0
-        maxRetries: -1             # -1 = infinite
-      heartbeat:
-        enabled: true
-        intervalMs: 30000
-        timeoutMs: 5000
-        message: '{"type":"heartbeat"}'
-      timeout:
-        connectMs: 5000
-        requestMs: 10000
+spring:
+  netty:
+    clients:
+      - name: order-service
+        host: 127.0.0.1
+        port: 9000
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 10
+          minIdle: 2
+          maxIdleMs: 60000
+          acquireTimeoutMs: 5000
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 30000
+          multiplier: 2.0
+          maxRetries: -1             # -1 = infinite
+        heartbeat:
+          enabled: true
+          intervalMs: 30000
+          timeoutMs: 5000
+          message: '{"type":"heartbeat"}'
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
 ```
 
 ### 2. Define Client Interface
@@ -346,38 +348,39 @@ public class OrderService {
 ## Features Configuration
 
 ```yaml
-netty:
-  servers:
-    - name: my-server
-      features:
-        # SSL/TLS encryption
-        ssl:
-          enabled: true
-          certPath: /path/to/cert.pem
-          keyPath: /path/to/key.pem
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          # SSL/TLS encryption
+          ssl:
+            enabled: true
+            certPath: /path/to/cert.pem
+            keyPath: /path/to/key.pem
 
-        # Idle detection
-        idle:
-          enabled: true
-          readSeconds: 60
-          writeSeconds: 30
-          allSeconds: 0
+          # Idle detection
+          idle:
+            enabled: true
+            readSeconds: 60
+            writeSeconds: 30
+            allSeconds: 0
 
-        # Logging
-        logging:
-          enabled: true
-          level: DEBUG
+          # Logging
+          logging:
+            enabled: true
+            level: DEBUG
 
-        # Rate limiting (Token Bucket)
-        rateLimit:
-          enabled: true
-          requestsPerSecond: 100
-          burstSize: 150
+          # Rate limiting (Token Bucket)
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 100
+            burstSize: 150
 
-        # Connection limiting
-        connectionLimit:
-          enabled: true
-          maxConnections: 10000
+          # Connection limiting
+          connectionLimit:
+            enabled: true
+            maxConnections: 10000
 ```
 
 ## Extension Points

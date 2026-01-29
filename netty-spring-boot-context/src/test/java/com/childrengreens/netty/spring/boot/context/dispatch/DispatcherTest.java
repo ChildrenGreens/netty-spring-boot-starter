@@ -16,6 +16,8 @@
 
 package com.childrengreens.netty.spring.boot.context.dispatch;
 
+import com.childrengreens.netty.spring.boot.context.annotation.PathVar;
+import com.childrengreens.netty.spring.boot.context.annotation.Query;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
@@ -30,7 +32,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -233,6 +238,174 @@ class DispatcherTest {
         assertThat(resolvers).isNotNull();
     }
 
+    // ==================== Tests for lines 136-139 (argumentResolvers.resolveArgument returns non-null) ====================
+
+    @Test
+    void dispatch_withPathVariableParameter_resolvesFromPathVariables() throws Exception {
+        // Add PathVariableArgumentResolver to handle @PathVariable
+        dispatcher.getArgumentResolvers().addResolver(new PathVariableArgumentResolver());
+
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/users/{id}", null, handler,
+                TestHandler.class.getMethod("handleWithPathVariable", String.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.singletonMap("id", "123"));
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/users/123")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(200);
+        assertThat(result.getPayload()).isEqualTo("user-123");
+    }
+
+    @Test
+    void dispatch_withQueryParameter_resolvesFromQueryParams() throws Exception {
+        // Add QueryArgumentResolver to handle @Query
+        dispatcher.getArgumentResolvers().addResolver(new QueryArgumentResolver());
+
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/search", null, handler,
+                TestHandler.class.getMethod("handleWithQueryParam", String.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        // Query parameters are passed via headers with key "queryParams"
+        Map<String, String> queryParams = new HashMap<>();
+        queryParams.put("q", "test-query");
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/search")
+                .header("queryParams", queryParams)
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(200);
+        assertThat(result.getPayload()).isEqualTo("search-test-query");
+    }
+
+    // ==================== Tests for lines 183-185 (CompletionStage return type) ====================
+
+    @Test
+    void dispatch_handlerReturnsCompletionStage_awaitsResult() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleAsyncCompletionStage"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(200);
+        assertThat(result.getPayload()).isEqualTo("completion stage result");
+    }
+
+    // ==================== Tests for lines 199-203 (wrapReturnValue with null and OutboundMessage) ====================
+
+    @Test
+    void dispatch_asyncHandlerReturnsNull_returnsNull() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleAsyncReturnsNull"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        // wrapReturnValue returns null when value is null (line 199-200)
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void dispatch_asyncHandlerReturnsOutboundMessage_returnsDirectly() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleAsyncReturnsOutbound"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        // wrapReturnValue returns the OutboundMessage directly (line 202-203)
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(202);
+        assertThat(result.getPayload()).isEqualTo("async outbound");
+    }
+
+    @Test
+    void dispatch_completionStageReturnsNull_returnsNull() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleCompletionStageReturnsNull"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void dispatch_completionStageReturnsOutboundMessage_returnsDirectly() throws Exception {
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleCompletionStageReturnsOutbound"), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(204);
+    }
+
     // Test handler class
     public static class TestHandler {
         public String handleSimple() {
@@ -261,6 +434,37 @@ class DispatcherTest {
 
         public String handleWithMessage(InboundMessage msg) {
             return msg != null ? "message" : "null";
+        }
+
+        // Methods for testing argument resolvers (lines 136-139)
+        public String handleWithPathVariable(@PathVar("id") String id) {
+            return "user-" + id;
+        }
+
+        public String handleWithQueryParam(@Query("q") String query) {
+            return "search-" + query;
+        }
+
+        // Methods for testing CompletionStage (lines 183-185)
+        public CompletionStage<String> handleAsyncCompletionStage() {
+            return CompletableFuture.completedFuture("completion stage result");
+        }
+
+        // Methods for testing wrapReturnValue (lines 199-203)
+        public CompletableFuture<String> handleAsyncReturnsNull() {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        public CompletableFuture<OutboundMessage> handleAsyncReturnsOutbound() {
+            return CompletableFuture.completedFuture(OutboundMessage.status(202, "async outbound"));
+        }
+
+        public CompletionStage<String> handleCompletionStageReturnsNull() {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        public CompletionStage<OutboundMessage> handleCompletionStageReturnsOutbound() {
+            return CompletableFuture.completedFuture(OutboundMessage.status(204, "No Content"));
         }
     }
 }

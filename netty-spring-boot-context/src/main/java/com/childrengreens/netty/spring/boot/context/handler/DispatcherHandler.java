@@ -17,6 +17,7 @@
 package com.childrengreens.netty.spring.boot.context.handler;
 
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
+import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
 import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
@@ -24,6 +25,8 @@ import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -50,9 +53,20 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
 
     private static final Logger logger = LoggerFactory.getLogger(DispatcherHandler.class);
 
+    /**
+     * Default route key when extraction fails.
+     */
+    private static final String DEFAULT_ROUTE_KEY = "unknown";
+
+    /**
+     * Supported route key field names in JSON messages.
+     */
+    private static final String[] ROUTE_KEY_FIELDS = {"type", "cmd", "action", "command"};
+
     private final Dispatcher dispatcher;
     private final ServerSpec serverSpec;
     private final CodecRegistry codecRegistry;
+    private final ObjectMapper objectMapper;
 
     /**
      * Create a new DispatcherHandler.
@@ -64,6 +78,21 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         this.dispatcher = dispatcher;
         this.serverSpec = serverSpec;
         this.codecRegistry = codecRegistry;
+        this.objectMapper = resolveObjectMapper(codecRegistry);
+    }
+
+    /**
+     * Resolve ObjectMapper from CodecRegistry or create a new one.
+     * @param codecRegistry the codec registry
+     * @return the ObjectMapper instance
+     */
+    private static ObjectMapper resolveObjectMapper(CodecRegistry codecRegistry) {
+        NettyCodec codec = codecRegistry.getCodec(JsonNettyCodec.NAME);
+        if (codec instanceof JsonNettyCodec) {
+            return ((JsonNettyCodec) codec).getObjectMapper();
+        }
+        // Fallback to a new ObjectMapper if no JSON codec registered
+        return new ObjectMapper();
     }
 
     @Override
@@ -168,28 +197,41 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     }
 
     /**
-     * Extract type field from JSON bytes.
+     * Extract route key field from JSON bytes using Jackson.
+     *
+     * <p>This method safely parses JSON and looks for common route key fields
+     * such as "type", "cmd", "action", or "command".
+     *
+     * @param bytes the JSON bytes
+     * @return the extracted route key, or {@link #DEFAULT_ROUTE_KEY} if not found
      */
     private String extractTypeFromJson(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return DEFAULT_ROUTE_KEY;
+        }
+
         try {
-            String json = new String(bytes, StandardCharsets.UTF_8);
-            // Simple extraction - a more robust implementation would use Jackson
-            int typeIndex = json.indexOf("\"type\"");
-            if (typeIndex == -1) {
-                typeIndex = json.indexOf("\"cmd\"");
+            JsonNode rootNode = objectMapper.readTree(bytes);
+
+            if (rootNode == null || !rootNode.isObject()) {
+                return DEFAULT_ROUTE_KEY;
             }
-            if (typeIndex != -1) {
-                int colonIndex = json.indexOf(':', typeIndex);
-                int quoteStart = json.indexOf('"', colonIndex);
-                int quoteEnd = json.indexOf('"', quoteStart + 1);
-                if (quoteStart != -1 && quoteEnd != -1) {
-                    return json.substring(quoteStart + 1, quoteEnd);
+
+            // Try each supported field name in order
+            for (String fieldName : ROUTE_KEY_FIELDS) {
+                JsonNode fieldNode = rootNode.get(fieldName);
+                if (fieldNode != null && fieldNode.isTextual()) {
+                    String value = fieldNode.asText();
+                    if (value != null && !value.isEmpty()) {
+                        return value;
+                    }
                 }
             }
         } catch (Exception e) {
-            logger.debug("Failed to extract type from JSON", e);
+            logger.debug("Failed to extract route key from JSON: {}", e.getMessage());
         }
-        return "unknown";
+
+        return DEFAULT_ROUTE_KEY;
     }
 
     /**

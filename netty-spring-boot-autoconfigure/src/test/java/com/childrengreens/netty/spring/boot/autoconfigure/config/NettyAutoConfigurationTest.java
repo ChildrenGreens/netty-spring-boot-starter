@@ -42,9 +42,7 @@ class NettyAutoConfigurationTest {
 
     @Test
     void autoConfiguration_createsNettyProperties() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(NettyProperties.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(NettyProperties.class));
     }
 
     @Test
@@ -85,69 +83,51 @@ class NettyAutoConfigurationTest {
 
     @Test
     void autoConfiguration_createsRouter() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(Router.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(Router.class));
     }
 
     @Test
     void autoConfiguration_createsDispatcher() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(Dispatcher.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(Dispatcher.class));
     }
 
     @Test
     void autoConfiguration_createsAnnotationRegistry() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(AnnotationRegistry.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(AnnotationRegistry.class));
     }
 
     @Test
     void autoConfiguration_createsTransportFactory() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(TransportFactory.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(TransportFactory.class));
     }
 
     @Test
     void autoConfiguration_createsPipelineAssembler() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(PipelineAssembler.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(PipelineAssembler.class));
     }
 
     @Test
     void autoConfiguration_createsNettyServerOrchestrator() {
-        this.contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(NettyServerOrchestrator.class);
-        });
+        this.contextRunner.run(context -> assertThat(context).hasSingleBean(NettyServerOrchestrator.class));
     }
 
     @Test
     void autoConfiguration_disabledWhenPropertySetToFalse() {
         this.contextRunner
-                .withPropertyValues("netty.enabled=false")
-                .run(context -> {
-                    assertThat(context).doesNotHaveBean(NettyServerOrchestrator.class);
-                });
+                .withPropertyValues("spring.netty.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(NettyServerOrchestrator.class));
     }
 
     @Test
     void autoConfiguration_respectsCustomBeans() {
         this.contextRunner
                 .withBean(Router.class, Router::new)
-                .run(context -> {
-                    assertThat(context).hasSingleBean(Router.class);
-                });
+                .run(context -> assertThat(context).hasSingleBean(Router.class));
     }
 
     @Test
     void autoConfiguration_notLoadedWithoutNettyOnClasspath() {
         new ApplicationContextRunner()
-                .run(context -> {
-                    assertThat(context).doesNotHaveBean(NettyAutoConfiguration.class);
-                });
+                .run(context -> assertThat(context).doesNotHaveBean(NettyAutoConfiguration.class));
     }
 }

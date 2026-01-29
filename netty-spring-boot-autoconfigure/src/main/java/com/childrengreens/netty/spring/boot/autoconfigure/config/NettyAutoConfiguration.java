@@ -52,12 +52,14 @@ import com.childrengreens.netty.spring.boot.context.routing.Router;
 import com.childrengreens.netty.spring.boot.context.server.NettyServerOrchestrator;
 import com.childrengreens.netty.spring.boot.context.transport.TransportFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Role;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,7 +70,7 @@ import java.util.List;
  * <p>This configuration is activated when:
  * <ul>
  * <li>Netty classes are on the classpath</li>
- * <li>{@code netty.enabled} property is not {@code false}</li>
+ * <li>{@code spring.netty.enabled} property is not {@code false}</li>
  * </ul>
  *
  * @author Netty Spring Boot
@@ -76,7 +78,7 @@ import java.util.List;
  */
 @AutoConfiguration
 @ConditionalOnClass(io.netty.channel.Channel.class)
-@ConditionalOnProperty(prefix = "netty", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "spring.netty", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(NettyProperties.class)
 public class NettyAutoConfiguration {
 
@@ -146,11 +148,20 @@ public class NettyAutoConfiguration {
 
     /**
      * Create the router.
+     *
+     * <p>This method is static to avoid early instantiation of the configuration class
+     * when {@link AnnotationRegistry} (a BeanPostProcessor) obtains the Router via
+     * {@link org.springframework.beans.factory.BeanFactory#getBean(Class)}.
+     *
+     * <p>The {@link Role} annotation marks this bean as infrastructure to suppress
+     * the warning about it being created early.
+     *
      * @return the router
      */
     @Bean
     @ConditionalOnMissingBean
-    public Router router() {
+    @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+    public static Router router() {
         return new Router();
     }
 
@@ -179,13 +190,24 @@ public class NettyAutoConfiguration {
 
     /**
      * Create the annotation registry for scanning handler methods.
-     * @param router the router
+     *
+     * <p>This method is static because {@link AnnotationRegistry} implements
+     * {@link org.springframework.beans.factory.config.BeanPostProcessor}, which must be
+     * instantiated early in the container lifecycle. Declaring this as static avoids
+     * premature instantiation of the configuration class.
+     *
+     * <p>The {@link Router} dependency is obtained via {@link org.springframework.beans.factory.BeanFactoryAware}
+     * and {@link org.springframework.beans.factory.InitializingBean} in the AnnotationRegistry itself.
+     *
      * @return the annotation registry
+     * @see <a href="https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/context/annotation/Bean.html">
+     *      Spring @Bean documentation</a>
      */
     @Bean
     @ConditionalOnMissingBean
-    public AnnotationRegistry annotationRegistry(Router router) {
-        return new AnnotationRegistry(router);
+    @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+    public static AnnotationRegistry annotationRegistry() {
+        return new AnnotationRegistry();
     }
 
     /**
