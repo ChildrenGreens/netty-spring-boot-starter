@@ -1,0 +1,232 @@
+= Extension Points
+:page-pagination:
+
+Netty Spring Boot Starter provides several extension points for customization.
+
+== Custom Profile
+
+Create a custom protocol profile:
+
+[source,java]
+----
+@Component
+public class MyCustomProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "my-custom-profile";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("myDecoder", new MyDecoder());
+        pipeline.addLast("myEncoder", new MyEncoder());
+    }
+
+    @Override
+    public String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
+}
+----
+
+Use in configuration:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        profile: my-custom-profile
+----
+
+== Custom Codec
+
+Create a custom serialization codec:
+
+[source,java]
+----
+@Component
+public class ProtobufCodec implements NettyCodec {
+
+    @Override
+    public String getName() {
+        return "protobuf";
+    }
+
+    @Override
+    public byte[] encode(Object object) {
+        return ((Message) object).toByteArray();
+    }
+
+    @Override
+    public <T> T decode(byte[] bytes, Class<T> targetType) {
+        try {
+            Method parseFrom = targetType.getMethod("parseFrom", byte[].class);
+            return targetType.cast(parseFrom.invoke(null, bytes));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to decode protobuf", e);
+        }
+    }
+}
+----
+
+== Pipeline Configurer
+
+Add custom handlers to specific servers:
+
+[source,java]
+----
+@Component
+public class MyPipelineConfigurer implements NettyPipelineConfigurer {
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // Add handler before dispatcher
+        pipeline.addBefore("dispatcherHandler", "myHandler", new MyHandler());
+    }
+
+    @Override
+    public boolean supports(ServerSpec serverSpec) {
+        // Only apply to specific server
+        return "my-server".equals(serverSpec.getName());
+    }
+
+    @Override
+    public int getOrder() {
+        return 0;  // Lower = earlier
+    }
+}
+----
+
+== Custom Route Resolver
+
+Create custom route key extraction:
+
+[source,java]
+----
+@Component
+public class MyRouteResolver implements NettyRouteResolver {
+
+    @Override
+    public String resolveRouteKey(InboundMessage message) {
+        // Extract route key from custom header
+        return (String) message.getHeader("cmd");
+    }
+
+    @Override
+    public boolean supports(ServerSpec serverSpec) {
+        return "my-server".equals(serverSpec.getName());
+    }
+}
+----
+
+== Custom Argument Resolver
+
+Create custom parameter resolution:
+
+[source,java]
+----
+@Component
+public class UserArgumentResolver implements ArgumentResolver {
+
+    @Override
+    public boolean supports(Parameter parameter) {
+        return parameter.getType() == User.class;
+    }
+
+    @Override
+    public Object resolve(Parameter parameter, InboundMessage message,
+                          NettyContext context, Map<String, String> pathVariables) {
+        // Resolve User from session or token
+        String token = (String) message.getHeader("header.authorization");
+        return userService.getUserFromToken(token);
+    }
+}
+----
+
+Register it:
+
+[source,java]
+----
+@Configuration
+public class NettyConfig {
+
+    @Autowired
+    public void configureArgumentResolvers(Dispatcher dispatcher) {
+        dispatcher.getArgumentResolvers().addResolver(new UserArgumentResolver());
+    }
+}
+----
+
+== Custom Client Profile
+
+Create a custom client profile:
+
+[source,java]
+----
+@Component
+public class MyClientProfile implements ClientProfile {
+
+    @Override
+    public String getName() {
+        return "my-client-profile";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        pipeline.addLast("myDecoder", new MyDecoder());
+        pipeline.addLast("myEncoder", new MyEncoder());
+    }
+}
+----
+
+== Custom Feature Provider
+
+Create a custom feature:
+
+[source,java]
+----
+@Component
+public class MetricsFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 180;
+
+    @Override
+    public String getName() {
+        return "metrics";
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> metrics = (Map<String, Object>) features.get("metrics");
+        return metrics != null && Boolean.TRUE.equals(metrics.get("enabled"));
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("metricsHandler", new MetricsHandler());
+    }
+}
+----
+
+Configuration:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          metrics:
+            enabled: true
+----

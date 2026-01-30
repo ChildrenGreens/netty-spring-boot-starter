@@ -1,0 +1,218 @@
+= Actuator Integration
+:page-pagination:
+
+When `spring-boot-actuator` is on the classpath, Netty Spring Boot Starter provides endpoints and metrics.
+
+== Endpoints
+
+[cols="2,3"]
+|===
+|Endpoint |Description
+
+|`GET /actuator/netty`
+|List all Netty servers and clients
+
+|`GET /actuator/netty/servers`
+|List all server details
+
+|`GET /actuator/netty/servers/{name}`
+|Get specific server info
+
+|`GET /actuator/netty/clients`
+|List all client details
+
+|`GET /actuator/netty/clients/{name}`
+|Get specific client info
+
+|`GET /actuator/health/netty`
+|Health check for all
+|===
+
+== Enable Endpoints
+
+[source,yaml]
+----
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,netty
+  endpoint:
+    netty:
+      enabled: true
+----
+
+== Example Responses
+
+=== List All
+
+[source,bash]
+----
+GET /actuator/netty
+----
+
+[source,json]
+----
+{
+  "servers": ["tcp-server", "http-server"],
+  "clients": ["order-service"]
+}
+----
+
+=== Server Details
+
+[source,bash]
+----
+GET /actuator/netty/servers/tcp-server
+----
+
+[source,json]
+----
+{
+  "name": "tcp-server",
+  "transport": "TCP",
+  "host": "0.0.0.0",
+  "port": 9000,
+  "profile": "tcp-lengthfield-json",
+  "status": "RUNNING",
+  "connections": {
+    "current": 42,
+    "total": 1523
+  }
+}
+----
+
+=== Client Details
+
+[source,bash]
+----
+GET /actuator/netty/clients/order-service
+----
+
+[source,json]
+----
+{
+  "name": "order-service",
+  "host": "127.0.0.1",
+  "port": 9000,
+  "profile": "tcp-lengthfield-json",
+  "status": "CONNECTED",
+  "pool": {
+    "size": 10,
+    "active": 3,
+    "idle": 7,
+    "pending": 0
+  }
+}
+----
+
+=== Health Check
+
+[source,bash]
+----
+GET /actuator/health/netty
+----
+
+[source,json]
+----
+{
+  "status": "UP",
+  "details": {
+    "servers": {
+      "tcp-server": "UP",
+      "http-server": "UP"
+    },
+    "clients": {
+      "order-service": "UP"
+    }
+  }
+}
+----
+
+== Metrics (Micrometer)
+
+=== Server Metrics
+
+[cols="2,3"]
+|===
+|Metric |Description
+
+|`netty.server.connections.current`
+|Current server connections
+
+|`netty.server.connections.total`
+|Total server connections
+
+|`netty.server.bytes.in`
+|Server bytes received
+
+|`netty.server.bytes.out`
+|Server bytes sent
+
+|`netty.server.requests.total`
+|Server request count
+
+|`netty.server.request.latency`
+|Server request latency
+|===
+
+=== Client Metrics
+
+[cols="2,3"]
+|===
+|Metric |Description
+
+|`netty.client.connections.current`
+|Current client connections
+
+|`netty.client.pool.size`
+|Connection pool size
+
+|`netty.client.pool.pending`
+|Pending connection requests
+
+|`netty.client.requests.total`
+|Client request count
+
+|`netty.client.request.latency`
+|Client request latency
+
+|`netty.client.reconnect.count`
+|Reconnection attempts
+|===
+
+== Prometheus Example
+
+[source,bash]
+----
+GET /actuator/prometheus
+----
+
+[source,text]
+----
+# HELP netty_server_connections_current Current server connections
+# TYPE netty_server_connections_current gauge
+netty_server_connections_current{server="tcp-server"} 42.0
+netty_server_connections_current{server="http-server"} 15.0
+
+# HELP netty_server_requests_total Total server requests
+# TYPE netty_server_requests_total counter
+netty_server_requests_total{server="tcp-server"} 15230.0
+
+# HELP netty_client_pool_size Connection pool size
+# TYPE netty_client_pool_size gauge
+netty_client_pool_size{client="order-service"} 10.0
+----
+
+== Configuration
+
+Enable observability features:
+
+[source,yaml]
+----
+spring:
+  netty:
+    observability:
+      metrics: true    # Enable Micrometer metrics
+      health: true     # Enable health check
+----

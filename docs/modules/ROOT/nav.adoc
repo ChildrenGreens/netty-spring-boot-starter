@@ -1,0 +1,12 @@
+* xref:index.adoc[Introduction]
+* xref:getting-started.adoc[Getting Started]
+* xref:configuration.adoc[Configuration]
+* Server
+** xref:server/handlers.adoc[Handlers]
+** xref:server/profiles.adoc[Profiles]
+** xref:server/features.adoc[Features]
+* Client
+** xref:client/usage.adoc[Usage]
+** xref:client/connection-pool.adoc[Connection Pool]
+* xref:extension.adoc[Extension Points]
+* xref:actuator.adoc[Actuator Integration]

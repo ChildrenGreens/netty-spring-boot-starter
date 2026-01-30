@@ -1,0 +1,189 @@
+= Client Usage
+:page-pagination:
+
+Netty Spring Boot Starter provides a declarative client interface similar to Spring Cloud OpenFeign.
+
+== Enable Client Scanning
+
+Add `@EnableNettyClients` to your application:
+
+[source,java]
+----
+@SpringBootApplication
+@EnableNettyClients(basePackages = "com.example.clients")
+public class MyApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MyApplication.class, args);
+    }
+}
+----
+
+== Configure Client
+
+Add client configuration to `application.yml`:
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        host: 127.0.0.1
+        port: 9000
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 10
+          minIdle: 2
+        reconnect:
+          enabled: true
+        heartbeat:
+          enabled: true
+          intervalMs: 30000
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
+----
+
+== Define Client Interface
+
+Create an interface annotated with `@NettyClient`:
+
+[source,java]
+----
+@NettyClient(name = "order-service")
+public interface OrderClient {
+
+    @NettyRequest(type = "ping")
+    PongResponse ping();
+
+    @NettyRequest(type = "order", timeout = 5000)
+    CompletableFuture<OrderResponse> createOrder(OrderRequest request);
+
+    @NettyRequest(value = "notify", oneWay = true)
+    void notifyUser(@Param("userId") Long userId);
+}
+----
+
+== Client Annotations
+
+[cols="2,3"]
+|===
+|Annotation |Description
+
+|`@NettyClient`
+|Marks interface as Netty client
+
+|`@NettyRequest`
+|Marks method as request
+
+|`@Param`
+|Parameter binding
+|===
+
+== Use Client
+
+Inject and use the client:
+
+[source,java]
+----
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderClient orderClient;  // Auto-injected proxy
+
+    public void process() {
+        // Sync call
+        PongResponse pong = orderClient.ping();
+
+        // Async call
+        orderClient.createOrder(request)
+            .thenAccept(response -> log.info("Order created: {}", response));
+
+        // One-way call (no response)
+        orderClient.notifyUser(123L);
+    }
+}
+----
+
+== Request Types
+
+=== Sync Request
+
+Blocks until response is received:
+
+[source,java]
+----
+@NettyRequest(type = "ping")
+PongResponse ping();
+----
+
+=== Async Request
+
+Returns `CompletableFuture`:
+
+[source,java]
+----
+@NettyRequest(type = "order", timeout = 5000)
+CompletableFuture<OrderResponse> createOrder(OrderRequest request);
+----
+
+=== One-Way Request
+
+Fire and forget, no response expected:
+
+[source,java]
+----
+@NettyRequest(value = "notify", oneWay = true)
+void notifyUser(@Param("userId") Long userId);
+----
+
+== Parameter Binding
+
+=== Single Object
+
+If method has one parameter without `@Param`, it's used as the entire payload:
+
+[source,java]
+----
+@NettyRequest(type = "order")
+OrderResponse createOrder(OrderRequest request);
+// Sends: {"type":"order", ...request fields...}
+----
+
+=== Named Parameters
+
+Use `@Param` for named parameters:
+
+[source,java]
+----
+@NettyRequest(type = "transfer")
+TransferResponse transfer(
+    @Param("from") String fromAccount,
+    @Param("to") String toAccount,
+    @Param("amount") BigDecimal amount
+);
+// Sends: {"type":"transfer","from":"...","to":"...","amount":...}
+----
+
+== Timeout Configuration
+
+Set timeout at method level:
+
+[source,java]
+----
+@NettyRequest(type = "slowOperation", timeout = 30000)  // 30 seconds
+SlowResponse slowOperation(SlowRequest request);
+----
+
+Or globally in configuration:
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        timeout:
+          requestMs: 10000  # Default timeout for all requests
+----

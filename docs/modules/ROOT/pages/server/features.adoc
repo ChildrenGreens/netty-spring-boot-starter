@@ -1,0 +1,159 @@
+= Features
+:page-pagination:
+
+Features are optional capabilities that can be added to a server's pipeline. Features have an order that determines their position in the pipeline.
+
+== Built-in Features
+
+[cols="2,1,3"]
+|===
+|Feature |Order |Description
+
+|`ssl`
+|10
+|SSL/TLS encryption
+
+|`connectionLimit`
+|10
+|Limit maximum connections
+
+|`logging`
+|50
+|Log all inbound/outbound data
+
+|`rateLimit`
+|50
+|Token bucket rate limiting
+
+|`idle`
+|150
+|Idle connection detection
+|===
+
+== SSL/TLS
+
+Enable SSL encryption:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: secure-server
+        features:
+          ssl:
+            enabled: true
+            certPath: /path/to/cert.pem
+            keyPath: /path/to/key.pem
+----
+
+== Connection Limit
+
+Limit maximum concurrent connections:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          connectionLimit:
+            enabled: true
+            maxConnections: 10000
+----
+
+== Logging
+
+Log all network traffic (useful for debugging):
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          logging:
+            enabled: true
+            level: DEBUG   # TRACE, DEBUG, INFO, WARN, ERROR
+----
+
+== Rate Limiting
+
+Token bucket rate limiting:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 100
+            burstSize: 150
+----
+
+== Idle Detection
+
+Detect idle connections and trigger events:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          idle:
+            enabled: true
+            readSeconds: 60    # No read for 60s
+            writeSeconds: 30   # No write for 30s
+            allSeconds: 0      # No activity (0 = disabled)
+----
+
+== Feature Ordering
+
+Features are applied in order:
+
+1. Order < 200: SSL, ConnectionLimit, Logging, RateLimit, Idle
+2. Profile handlers (framing, codec)
+3. Order >= 200: Business features
+4. DispatcherHandler
+5. ExceptionHandler
+
+== Custom Feature
+
+Create a custom feature by implementing `FeatureProvider`:
+
+[source,java]
+----
+@Component
+public class MyFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 100;
+
+    @Override
+    public String getName() {
+        return "my-feature";
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        // Check if feature is enabled in config
+        return serverSpec.getFeatures().containsKey("myFeature");
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("myHandler", new MyHandler());
+    }
+}
+----

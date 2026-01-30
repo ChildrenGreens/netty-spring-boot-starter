@@ -1,0 +1,17 @@
+{
+  "name": "netty-spring-boot-starter-docs",
+  "version": "0.0.1",
+  "description": "Documentation for Netty Spring Boot Starter",
+  "scripts": {
+    "docs": "antora antora-playbook.yml",
+    "docs:local": "antora antora-playbook.yml --fetch",
+    "docs:serve": "npm run docs && npx serve build/site -l 3000",
+    "docs:clean": "rm -rf build/site"
+  },
+  "devDependencies": {
+    "@antora/cli": "^3.1.7",
+    "@antora/site-generator": "^3.1.7",
+    "serve": "^14.2.1"
+  },
+  "private": true
+}

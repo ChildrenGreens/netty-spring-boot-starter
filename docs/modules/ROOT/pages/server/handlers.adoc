@@ -1,0 +1,186 @@
+= Handlers
+:page-pagination:
+
+This page documents the different handler types available for processing network messages.
+
+== Handler Annotations
+
+[cols="2,3"]
+|===
+|Annotation |Description
+
+|`@NettyController`
+|HTTP/WebSocket controller
+
+|`@NettyMessageController`
+|TCP/UDP message controller
+
+|`@NettyMessageMapping`
+|Message type mapping
+
+|`@NettyHttpGet/Post/Put/Delete`
+|HTTP method mapping
+
+|`@NettyWsOnOpen/Text/Binary/Close`
+|WebSocket event mapping
+|===
+
+== Parameter Annotations
+
+[cols="2,3"]
+|===
+|Annotation |Description
+
+|`@PathVar`
+|Extract path variable from URL
+
+|`@Query`
+|Extract query parameter
+
+|`@Body`
+|Extract request body
+
+|`@Header`
+|Extract HTTP header
+|===
+
+== TCP/UDP Message Handler
+
+Use `@NettyMessageController` for handling TCP/UDP messages:
+
+[source,java]
+----
+@NettyMessageController
+public class MessageHandler {
+
+    @NettyMessageMapping("ping")
+    public Map<String, Object> handlePing(NettyContext context) {
+        return Map.of(
+            "type", "pong",
+            "timestamp", System.currentTimeMillis(),
+            "channelId", context.getChannelId()
+        );
+    }
+
+    @NettyMessageMapping("order")
+    public CompletableFuture<OrderResponse> handleOrder(
+            OrderRequest request, NettyContext context) {
+        // Async processing supported
+        return orderService.processAsync(request);
+    }
+}
+----
+
+== HTTP Controller
+
+Use `@NettyController` with HTTP method annotations:
+
+[source,java]
+----
+@NettyController(path = "/api")
+public class HttpController {
+
+    @NettyHttpGet("/health")
+    public Map<String, Object> health() {
+        return Map.of("status", "UP");
+    }
+
+    @NettyHttpGet("/users/{id}")
+    public User getUser(@PathVar("id") Long id, @Query("fields") String fields) {
+        return userService.findById(id);
+    }
+
+    @NettyHttpPost("/users")
+    public User createUser(@Body User user) {
+        return userService.save(user);
+    }
+
+    @NettyHttpPut("/users/{id}")
+    public User updateUser(@PathVar("id") Long id, @Body User user) {
+        return userService.update(id, user);
+    }
+
+    @NettyHttpDelete("/users/{id}")
+    public void deleteUser(@PathVar("id") Long id) {
+        userService.delete(id);
+    }
+}
+----
+
+== WebSocket Handler
+
+Use `@NettyController` with WebSocket event annotations:
+
+[source,java]
+----
+@NettyController(path = "/ws")
+public class WebSocketHandler {
+
+    @NettyWsOnOpen("/chat")
+    public void onOpen(NettyContext context) {
+        log.info("WebSocket connected: {}", context.getChannelId());
+    }
+
+    @NettyWsOnText("/chat")
+    public String onMessage(String message, NettyContext context) {
+        return "Echo: " + message;
+    }
+
+    @NettyWsOnBinary("/chat")
+    public byte[] onBinary(byte[] data, NettyContext context) {
+        return data; // Echo binary
+    }
+
+    @NettyWsOnClose("/chat")
+    public void onClose(NettyContext context) {
+        log.info("WebSocket disconnected: {}", context.getChannelId());
+    }
+}
+----
+
+== Return Types
+
+Handlers support multiple return types:
+
+[cols="2,3"]
+|===
+|Return Type |Description
+
+|`void`
+|No response
+
+|`Object`
+|Sync response, serialized by codec
+
+|`CompletableFuture<T>`
+|Async response
+
+|`OutboundMessage`
+|Full control over response
+|===
+
+== NettyContext
+
+The `NettyContext` provides access to the underlying Netty channel:
+
+[source,java]
+----
+@NettyMessageMapping("example")
+public void handle(NettyContext context) {
+    // Get channel ID
+    String channelId = context.getChannelId();
+
+    // Get underlying Netty channel
+    Channel channel = context.getChannel();
+
+    // Get server name
+    String serverName = context.getServerName();
+
+    // Write message directly
+    context.write(message);
+    context.writeAndFlush(message);
+
+    // Close connection
+    context.close();
+}
+----

@@ -1,0 +1,22 @@
+site:
+  title: Netty Spring Boot Starter
+  url: https://childrengreens.github.io/netty-spring-boot-starter
+  start_page: netty-spring-boot::index.adoc
+
+content:
+  sources:
+    - url: .
+      branches: [main, 'v*']
+      start_path: docs
+
+ui:
+  bundle:
+    url: https://gitlab.com/antora/antora-ui-default/-/jobs/artifacts/HEAD/raw/build/ui-bundle.zip?job=bundle-stable
+    snapshot: true
+
+output:
+  dir: ./build/site
+
+asciidoc:
+  attributes:
+    page-pagination: true

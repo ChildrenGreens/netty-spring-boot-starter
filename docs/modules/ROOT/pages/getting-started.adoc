@@ -1,0 +1,77 @@
+= Getting Started
+:page-pagination:
+
+This guide walks you through adding Netty Spring Boot Starter to your project and creating your first server.
+
+== Add Dependency
+
+Add the following dependency to your `pom.xml`:
+
+[source,xml,subs="attributes+"]
+----
+<dependency>
+    <groupId>com.childrengreens</groupId>
+    <artifactId>netty-spring-boot-starter</artifactId>
+    <version>{project-version}</version>
+</dependency>
+----
+
+== Configure Server
+
+Add the following configuration to your `application.yml`:
+
+[source,yaml]
+----
+spring:
+  netty:
+    enabled: true
+    servers:
+      - name: tcp-server
+        transport: TCP
+        host: 0.0.0.0
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
+----
+
+== Create Handler
+
+Create a message handler using `@NettyMessageController`:
+
+[source,java]
+----
+@NettyMessageController
+public class MessageHandler {
+
+    @NettyMessageMapping("ping")
+    public Map<String, Object> handlePing(NettyContext context) {
+        return Map.of(
+            "type", "pong",
+            "timestamp", System.currentTimeMillis(),
+            "channelId", context.getChannelId()
+        );
+    }
+}
+----
+
+== Run Application
+
+Start your Spring Boot application. The TCP server will be available on port 9000.
+
+== Test Connection
+
+You can test the server using `netcat` or a TCP client:
+
+[source,bash]
+----
+# Send a ping message (with 4-byte length prefix)
+echo -n '{"type":"ping"}' | nc localhost 9000
+----
+
+== Next Steps
+
+* xref:configuration.adoc[Configuration Reference] - Learn about all configuration options
+* xref:server/handlers.adoc[Handlers] - Learn about different handler types
+* xref:server/profiles.adoc[Profiles] - Learn about protocol profiles
+* xref:client/usage.adoc[Client Usage] - Learn how to create Netty clients

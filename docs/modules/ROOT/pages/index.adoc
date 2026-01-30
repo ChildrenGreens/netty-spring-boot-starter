@@ -1,0 +1,54 @@
+= Netty Spring Boot Starter
+:page-layout: home
+
+A comprehensive Spring Boot starter for building high-performance network applications with Netty.
+
+== Highlights
+
+* *One Configuration, Multiple Protocols* - Start TCP/HTTP/WebSocket/UDP servers with a single YAML configuration
+* *Annotation-Based Routing* - Develop handlers like Spring MVC / Spring Messaging
+* *Profile-Based Protocol Stacks* - One-click protocol setup, with Feature-based capability overlay
+* *Client Support* - Declarative client interfaces with connection pooling, reconnection, and heartbeat
+* *Production Ready* - Built-in observability (metrics/health), graceful shutdown support
+* *Highly Extensible* - Advanced users can extend via Configurer/Codec/RouteResolver
+
+== Architecture
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           application.yml                               │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
+│  │ spring.netty.servers[*]    │    │ spring.netty.clients[*]         │ │
+│  │    Server Configuration     │    │    Client Configuration         │ │
+│  └─────────────────────────────┘    └─────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │                              │
+                    ▼                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      netty-spring-boot-context                          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                       Shared Components                           │  │
+│  │  Codec │ Profile │ InboundMessage │ OutboundMessage │ NettyContext │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │                              │
+                    ▼                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Netty Runtime                                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────┐  │
+│  │  BossGroup  │ →  │ WorkerGroup │ →  │  ChannelPipeline           │  │
+│  └─────────────┘    └─────────────┘    │  (Staged Handlers)         │  │
+│                                         └────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+----
+
+== Requirements
+
+* Java {java-version}+
+* Spring Boot {spring-boot-version}+
+* Netty 4.1+
+
+== License
+
+Apache License 2.0

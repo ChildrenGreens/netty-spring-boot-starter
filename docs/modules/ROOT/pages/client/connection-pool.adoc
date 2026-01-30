@@ -1,0 +1,154 @@
+= Connection Pool
+:page-pagination:
+
+The client uses a connection pool to manage connections efficiently.
+
+== Pool Configuration
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        pool:
+          maxConnections: 10       # Maximum connections in pool
+          minIdle: 2               # Minimum idle connections
+          maxIdleMs: 60000         # Max idle time before eviction
+          acquireTimeoutMs: 5000   # Timeout waiting for connection
+----
+
+== Pool Behavior
+
+=== Connection Acquisition
+
+1. Try to get an idle connection from pool
+2. If no idle connection and pool not full, create new connection
+3. If pool is full, wait up to `acquireTimeoutMs`
+4. If timeout, throw exception
+
+=== Connection Release
+
+After request completes, connection is returned to pool:
+
+* If connection is healthy, it becomes idle
+* If connection is broken, it's discarded
+
+=== Idle Connection Management
+
+* Connections idle longer than `maxIdleMs` are evicted
+* Pool maintains at least `minIdle` connections
+
+== Reconnection
+
+Enable automatic reconnection for failed connections:
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000     # First retry delay
+          maxDelayMs: 30000        # Maximum retry delay
+          multiplier: 2.0          # Exponential backoff multiplier
+          maxRetries: -1           # -1 = infinite retries
+----
+
+=== Exponential Backoff
+
+Retry delays follow exponential backoff:
+
+[source,text]
+----
+Attempt 1: 1000ms
+Attempt 2: 2000ms
+Attempt 3: 4000ms
+Attempt 4: 8000ms
+Attempt 5: 16000ms
+Attempt 6: 30000ms (capped at maxDelayMs)
+----
+
+== Heartbeat
+
+Enable heartbeat to keep connections alive:
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        heartbeat:
+          enabled: true
+          intervalMs: 30000        # Send heartbeat every 30s
+          timeoutMs: 5000          # Heartbeat response timeout
+          message: '{"type":"heartbeat"}'  # Heartbeat message
+----
+
+=== Heartbeat Behavior
+
+1. Send heartbeat message at `intervalMs` interval
+2. Wait for response up to `timeoutMs`
+3. If no response, mark connection as unhealthy
+4. Unhealthy connections trigger reconnection
+
+== Timeouts
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        timeout:
+          connectMs: 5000          # Connection establishment timeout
+          requestMs: 10000         # Request/response timeout
+----
+
+== Connection Lifecycle
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────┐
+│                      Connection Pool                             │
+│                                                                  │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                   │
+│  │ Idle     │    │ Idle     │    │ In Use   │                   │
+│  │ Conn 1   │    │ Conn 2   │    │ Conn 3   │                   │
+│  └──────────┘    └──────────┘    └──────────┘                   │
+│       ↑               ↑               │                          │
+│       │               │               │                          │
+│       └───────────────┴───────────────┘                          │
+│                    release()                                     │
+│                                                                  │
+│  acquire() ─────────────────────────────► In Use                │
+│                                                                  │
+│  Unhealthy ─────────────────────────────► Reconnect             │
+│                                                                  │
+│  Idle > maxIdleMs ──────────────────────► Evict                 │
+└─────────────────────────────────────────────────────────────────┘
+----
+
+== Monitoring
+
+Pool metrics are available via Actuator:
+
+[source,bash]
+----
+GET /actuator/netty/clients/order-service
+
+{
+  "name": "order-service",
+  "host": "127.0.0.1",
+  "port": 9000,
+  "pool": {
+    "size": 10,
+    "active": 3,
+    "idle": 7,
+    "pending": 0
+  }
+}
+----
