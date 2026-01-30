@@ -85,7 +85,7 @@ public class NettyClientRegistrar implements BeanDefinitionRegistryPostProcessor
     }
 
     @Override
-    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
+    public void postProcessBeanDefinitionRegistry(@NonNull BeanDefinitionRegistry registry) throws BeansException {
         if (basePackages == null || basePackages.length == 0) {
             logger.debug("No base packages configured for NettyClient scanning");
             return;
@@ -107,7 +107,7 @@ public class NettyClientRegistrar implements BeanDefinitionRegistryPostProcessor
     }
 
     @Override
-    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+    public void postProcessBeanFactory(@NonNull ConfigurableListableBeanFactory beanFactory) throws BeansException {
         // No additional processing needed
     }
 
