@@ -1,11 +1,25 @@
 = Getting Started
 :page-pagination:
 
-This guide walks you through adding Netty Spring Boot Starter to your project and creating your first server.
+This guide walks you through creating your first Netty server and client with Spring Boot.
 
-== Add Dependency
+== Prerequisites
 
-Add the following dependency to your `pom.xml`:
+* JDK {java-version} or higher installed
+* Maven 3.6+ or Gradle 7+
+* Your favorite IDE (IntelliJ IDEA, Eclipse, VS Code)
+
+== Step 1: Create a Spring Boot Project
+
+Create a new Spring Boot project using https://start.spring.io/[Spring Initializr] or your IDE. Select:
+
+* Java {java-version}
+* Spring Boot {spring-boot-version}
+* Packaging: Jar
+
+== Step 2: Add Dependency
+
+Add the starter dependency to your `pom.xml`:
 
 [source,xml,subs="attributes+"]
 ----
@@ -16,9 +30,16 @@ Add the following dependency to your `pom.xml`:
 </dependency>
 ----
 
-== Configure Server
+Or for Gradle (`build.gradle`):
 
-Add the following configuration to your `application.yml`:
+[source,groovy,subs="attributes+"]
+----
+implementation 'com.childrengreens:netty-spring-boot-starter:{project-version}'
+----
+
+== Step 3: Configure the Server
+
+Create or edit `src/main/resources/application.yml`:
 
 [source,yaml]
 ----
@@ -26,52 +47,289 @@ spring:
   netty:
     enabled: true
     servers:
-      - name: tcp-server
-        transport: TCP
-        host: 0.0.0.0
-        port: 9000
-        profile: tcp-lengthfield-json
+      - name: my-tcp-server          # <1>
+        transport: TCP               # <2>
+        host: 0.0.0.0                # <3>
+        port: 9000                   # <4>
+        profile: tcp-lengthfield-json  # <5>
         routing:
-          mode: MESSAGE_TYPE
+          mode: MESSAGE_TYPE         # <6>
 ----
+<1> Unique name for this server instance
+<2> Transport protocol: `TCP`, `HTTP`, or `UDP`
+<3> Bind address (`0.0.0.0` = all interfaces)
+<4> Port number to listen on
+<5> Protocol profile defining framing and codec
+<6> How to route messages: `MESSAGE_TYPE` extracts type from JSON field
 
-== Create Handler
+== Step 4: Create a Message Handler
 
-Create a message handler using `@NettyMessageController`:
+Create a handler class to process incoming messages:
 
 [source,java]
 ----
-@NettyMessageController
+package com.example.demo.handler;
+
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageController;
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageMapping;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+
+import java.util.Map;
+
+@NettyMessageController  // <1>
 public class MessageHandler {
 
-    @NettyMessageMapping("ping")
-    public Map<String, Object> handlePing(NettyContext context) {
+    @NettyMessageMapping("ping")  // <2>
+    public Map<String, Object> handlePing(NettyContext context) {  // <3>
         return Map.of(
             "type", "pong",
             "timestamp", System.currentTimeMillis(),
             "channelId", context.getChannelId()
         );
     }
+
+    @NettyMessageMapping("echo")
+    public Map<String, Object> handleEcho(Map<String, Object> request, NettyContext context) {  // <4>
+        return Map.of(
+            "type", "echo.response",
+            "data", request.get("data"),
+            "serverTime", System.currentTimeMillis()
+        );
+    }
 }
 ----
+<1> Marks this class as a Netty message handler (like `@RestController` in Spring MVC)
+<2> Routes messages with `"type": "ping"` to this method
+<3> `NettyContext` provides access to channel information
+<4> Request payload is automatically deserialized from JSON
 
-== Run Application
+== Step 5: Run the Application
 
-Start your Spring Boot application. The TCP server will be available on port 9000.
-
-== Test Connection
-
-You can test the server using `netcat` or a TCP client:
+Start your Spring Boot application:
 
 [source,bash]
 ----
-# Send a ping message (with 4-byte length prefix)
-echo -n '{"type":"ping"}' | nc localhost 9000
+mvn spring-boot:run
+----
+
+You should see in the logs:
+
+[source,text]
+----
+INFO  c.c.n.s.b.c.server.NettyServerOrchestrator : Starting Netty server [my-tcp-server] on 0.0.0.0:9000
+INFO  c.c.n.s.b.c.server.NettyServerOrchestrator : Netty server [my-tcp-server] started successfully
+----
+
+== Step 6: Test the Server
+
+=== Using netcat (nc)
+
+The `tcp-lengthfield-json` profile expects messages with a 4-byte length prefix. For simple testing, you can use a TCP client or write a test class.
+
+=== Using a Java Test Client
+
+Create a simple test client:
+
+[source,java]
+----
+package com.example.demo;
+
+import java.io.*;
+import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+
+public class TestClient {
+    public static void main(String[] args) throws Exception {
+        try (Socket socket = new Socket("localhost", 9000)) {
+            OutputStream out = socket.getOutputStream();
+            InputStream in = socket.getInputStream();
+
+            // Prepare message
+            String message = "{\"type\":\"ping\"}";
+            byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+            // Send: 4-byte length prefix + message
+            ByteBuffer buffer = ByteBuffer.allocate(4 + messageBytes.length);
+            buffer.putInt(messageBytes.length);
+            buffer.put(messageBytes);
+            out.write(buffer.array());
+            out.flush();
+
+            // Read response: 4-byte length prefix
+            byte[] lengthBytes = new byte[4];
+            in.read(lengthBytes);
+            int length = ByteBuffer.wrap(lengthBytes).getInt();
+
+            // Read response body
+            byte[] responseBytes = new byte[length];
+            in.read(responseBytes);
+            String response = new String(responseBytes, StandardCharsets.UTF_8);
+
+            System.out.println("Response: " + response);
+            // Output: Response: {"type":"pong","timestamp":1706012345678,"channelId":"..."}
+        }
+    }
+}
+----
+
+== Complete Example Project Structure
+
+[source,text]
+----
+my-netty-app/
+├── pom.xml
+└── src/main/
+    ├── java/com/example/demo/
+    │   ├── DemoApplication.java
+    │   └── handler/
+    │       └── MessageHandler.java
+    └── resources/
+        └── application.yml
+----
+
+=== DemoApplication.java
+
+[source,java]
+----
+package com.example.demo;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class DemoApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DemoApplication.class, args);
+    }
+}
+----
+
+== Adding an HTTP Server
+
+You can run multiple servers simultaneously. Add an HTTP server to your configuration:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-tcp-server
+        transport: TCP
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
+
+      - name: my-http-server    # <1>
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH            # <2>
+----
+<1> Second server with different name and port
+<2> HTTP uses path-based routing
+
+Create an HTTP controller:
+
+[source,java]
+----
+package com.example.demo.handler;
+
+import com.childrengreens.netty.spring.boot.context.annotation.*;
+import java.util.Map;
+
+@NettyController(path = "/api")  // <1>
+public class HttpController {
+
+    @NettyHttpGet("/health")  // <2>
+    public Map<String, Object> health() {
+        return Map.of("status", "UP");
+    }
+
+    @NettyHttpGet("/users/{id}")  // <3>
+    public Map<String, Object> getUser(@PathVar("id") Long id) {
+        return Map.of("id", id, "name", "User " + id);
+    }
+
+    @NettyHttpPost("/users")
+    public Map<String, Object> createUser(@Body Map<String, Object> user) {  // <4>
+        return Map.of("id", 1, "name", user.get("name"), "created", true);
+    }
+}
+----
+<1> Base path for all endpoints in this controller
+<2> Maps to `GET /api/health`
+<3> Path variable extraction with `@PathVar`
+<4> Request body parsing with `@Body`
+
+Test with curl:
+
+[source,bash]
+----
+# Health check
+curl http://localhost:8080/api/health
+# {"status":"UP"}
+
+# Get user
+curl http://localhost:8080/api/users/123
+# {"id":123,"name":"User 123"}
+
+# Create user
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"name":"John"}' \
+     http://localhost:8080/api/users
+# {"id":1,"name":"John","created":true}
 ----
 
 == Next Steps
 
-* xref:configuration.adoc[Configuration Reference] - Learn about all configuration options
-* xref:server/handlers.adoc[Handlers] - Learn about different handler types
-* xref:server/profiles.adoc[Profiles] - Learn about protocol profiles
-* xref:client/usage.adoc[Client Usage] - Learn how to create Netty clients
+Now that you have a basic server running:
+
+* xref:configuration.adoc[Configuration Reference] - Learn all configuration options
+* xref:server/handlers.adoc[Handlers] - Deep dive into handler types and parameter binding
+* xref:server/profiles.adoc[Profiles] - Understand protocol profiles
+* xref:server/features.adoc[Features] - Add SSL, rate limiting, idle detection
+* xref:client/usage.adoc[Client Usage] - Create a declarative Netty client
+
+== Troubleshooting
+
+=== Port already in use
+
+[source,text]
+----
+java.net.BindException: Address already in use
+----
+
+Change the port in `application.yml` or stop the process using that port:
+
+[source,bash]
+----
+# Find process using port 9000
+lsof -i :9000
+# Kill the process
+kill -9 <PID>
+----
+
+=== No handler found for route
+
+[source,text]
+----
+WARN  No handler found for route: unknown (server=my-tcp-server)
+----
+
+This means the `type` field in your JSON message doesn't match any `@NettyMessageMapping`. Check:
+
+* Message has a `type` field: `{"type":"ping"}`
+* Spelling matches exactly (case-sensitive)
+* Handler class is annotated with `@NettyMessageController`
+* Handler class is in a package scanned by Spring Boot
+
+=== Handler method not invoked
+
+Ensure your handler class:
+
+* Is annotated with `@NettyMessageController` or `@NettyController`
+* Is in a package under your main application class
+* Is a Spring bean (component scanning is working)

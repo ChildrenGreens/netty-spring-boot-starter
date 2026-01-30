@@ -1,182 +1,316 @@
 = Client Usage
 :page-pagination:
 
-Netty Spring Boot Starter provides a declarative client interface similar to Spring Cloud OpenFeign.
+Netty Spring Boot Starter provides a declarative client interface similar to Spring Cloud OpenFeign. Define an interface, annotate it, and the framework generates a proxy that handles connection management, serialization, and request/response matching.
 
-== Enable Client Scanning
+== Overview
 
-Add `@EnableNettyClients` to your application:
-
-[source,java]
+[source,text]
 ----
-@SpringBootApplication
-@EnableNettyClients(basePackages = "com.example.clients")
-public class MyApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(MyApplication.class, args);
-    }
-}
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Your Application                                   │
+│                                                                              │
+│  @Service                                                                    │
+│  public class OrderService {                                                 │
+│      @Autowired                                                              │
+│      private OrderClient orderClient;  ←── Injected by Spring               │
+│                                                                              │
+│      public void process() {                                                 │
+│          orderClient.ping();           ←── Method call                       │
+│      }                                                                       │
+│  }                                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      ClientProxyFactory (Framework)                          │
+│                                                                              │
+│  1. Serialize request to JSON                                                │
+│  2. Get connection from pool                                                 │
+│  3. Send request with correlation ID                                         │
+│  4. Wait for response (or timeout)                                           │
+│  5. Deserialize response                                                     │
+│  6. Return to caller                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Connection Pool                                      │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                           │
+│  │ Channel │ │ Channel │ │ Channel │ │ Channel │  ←── Managed connections   │
+│  │  Idle   │ │  Idle   │ │ Active  │ │  Idle   │                           │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                              Remote Server
 ----
 
-== Configure Client
+== Quick Start
 
-Add client configuration to `application.yml`:
+=== Step 1: Add Client Configuration
+
+In `application.yml`:
 
 [source,yaml]
 ----
 spring:
   netty:
     clients:
-      - name: order-service
-        host: 127.0.0.1
-        port: 9000
-        profile: tcp-lengthfield-json
-        pool:
-          maxConnections: 10
-          minIdle: 2
-        reconnect:
-          enabled: true
-        heartbeat:
-          enabled: true
-          intervalMs: 30000
+      - name: order-service              # <1>
+        host: 127.0.0.1                  # <2>
+        port: 9000                       # <3>
+        profile: tcp-lengthfield-json    # <4>
         timeout:
-          connectMs: 5000
-          requestMs: 10000
+          connectMs: 5000                # <5>
+          requestMs: 10000               # <6>
 ----
+<1> Unique client name (matches `@NettyClient(name = "...")`)
+<2> Server hostname or IP
+<3> Server port
+<4> Protocol profile (must match server)
+<5> Connection timeout
+<6> Default request timeout
 
-== Define Client Interface
-
-Create an interface annotated with `@NettyClient`:
+=== Step 2: Define Client Interface
 
 [source,java]
 ----
-@NettyClient(name = "order-service")
+package com.example.client;
+
+import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
+import com.childrengreens.netty.spring.boot.context.annotation.NettyRequest;
+import com.childrengreens.netty.spring.boot.context.annotation.Param;
+
+import java.util.concurrent.CompletableFuture;
+
+@NettyClient(name = "order-service")  // <1>
 public interface OrderClient {
 
-    @NettyRequest(type = "ping")
+    @NettyRequest(type = "ping")       // <2>
     PongResponse ping();
 
-    @NettyRequest(type = "order", timeout = 5000)
-    CompletableFuture<OrderResponse> createOrder(OrderRequest request);
+    @NettyRequest(type = "order.create", timeout = 5000)  // <3>
+    OrderResponse createOrder(OrderRequest request);
 
-    @NettyRequest(value = "notify", oneWay = true)
-    void notifyUser(@Param("userId") Long userId);
+    @NettyRequest(type = "order.query")
+    CompletableFuture<OrderResponse> queryOrderAsync(  // <4>
+            @Param("orderId") String orderId);
+
+    @NettyRequest(value = "notify", oneWay = true)  // <5>
+    void notifyUser(@Param("userId") Long userId, @Param("message") String message);
 }
 ----
+<1> Links interface to client configuration
+<2> Message type sent to server
+<3> Per-method timeout override
+<4> Async method returns `CompletableFuture`
+<5> One-way call (fire-and-forget)
 
-== Client Annotations
-
-[cols="2,3"]
-|===
-|Annotation |Description
-
-|`@NettyClient`
-|Marks interface as Netty client
-
-|`@NettyRequest`
-|Marks method as request
-
-|`@Param`
-|Parameter binding
-|===
-
-== Use Client
-
-Inject and use the client:
+=== Step 3: Enable Client Scanning
 
 [source,java]
 ----
+package com.example;
+
+import com.childrengreens.netty.spring.boot.context.annotation.EnableNettyClients;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+@EnableNettyClients(basePackages = "com.example.client")  // <1>
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+----
+<1> Scan package for `@NettyClient` interfaces
+
+=== Step 4: Inject and Use
+
+[source,java]
+----
+package com.example.service;
+
+import com.example.client.OrderClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
 @Service
 public class OrderService {
 
     @Autowired
-    private OrderClient orderClient;  // Auto-injected proxy
+    private OrderClient orderClient;  // <1>
 
     public void process() {
-        // Sync call
-        PongResponse pong = orderClient.ping();
+        // Synchronous call
+        PongResponse pong = orderClient.ping();  // <2>
+        System.out.println("Server responded: " + pong);
 
-        // Async call
-        orderClient.createOrder(request)
-            .thenAccept(response -> log.info("Order created: {}", response));
+        // Synchronous call with request object
+        OrderRequest request = new OrderRequest("product-123", 2);
+        OrderResponse response = orderClient.createOrder(request);
+        System.out.println("Order created: " + response.getOrderId());
 
-        // One-way call (no response)
-        orderClient.notifyUser(123L);
+        // Asynchronous call
+        orderClient.queryOrderAsync("order-456")  // <3>
+                .thenAccept(order -> System.out.println("Order: " + order))
+                .exceptionally(ex -> {
+                    System.err.println("Query failed: " + ex.getMessage());
+                    return null;
+                });
+
+        // Fire-and-forget
+        orderClient.notifyUser(123L, "Your order is ready!");  // <4>
     }
 }
 ----
+<1> Spring injects the generated proxy
+<2> Blocks until response received
+<3> Returns immediately, callback invoked later
+<4> Returns immediately, no response expected
 
-== Request Types
+== Client Annotations
 
-=== Sync Request
+=== @NettyClient
 
-Blocks until response is received:
-
-[source,java]
-----
-@NettyRequest(type = "ping")
-PongResponse ping();
-----
-
-=== Async Request
-
-Returns `CompletableFuture`:
+Marks an interface as a Netty client.
 
 [source,java]
 ----
-@NettyRequest(type = "order", timeout = 5000)
-CompletableFuture<OrderResponse> createOrder(OrderRequest request);
+@NettyClient(name = "order-service")  // Required: matches config name
+public interface OrderClient {
+    // ...
+}
+
+// Alternative syntax
+@NettyClient(value = "order-service")
+public interface OrderClient {
+    // ...
+}
 ----
 
-=== One-Way Request
+=== @NettyRequest
 
-Fire and forget, no response expected:
+Marks a method as a request.
 
 [source,java]
 ----
-@NettyRequest(value = "notify", oneWay = true)
-void notifyUser(@Param("userId") Long userId);
+@NettyRequest(
+    type = "user.get",      // Message type (required)
+    timeout = 5000,         // Timeout in ms (optional, overrides default)
+    oneWay = false          // If true, no response expected (optional)
+)
+User getUser(Long id);
+
+// Short form
+@NettyRequest("user.get")
+User getUser(Long id);
+----
+
+=== @Param
+
+Binds method parameters to named fields.
+
+[source,java]
+----
+@NettyRequest("user.search")
+List<User> searchUsers(
+    @Param("name") String name,            // Required parameter
+    @Param(value = "age", required = false) Integer age  // Optional
+);
+
+// Sent as: {"type":"user.search","name":"John","age":25}
 ----
 
 == Parameter Binding
 
-=== Single Object
+=== Single Object Parameter
 
-If method has one parameter without `@Param`, it's used as the entire payload:
+If a method has one parameter without `@Param`, it's serialized as the entire payload:
 
 [source,java]
 ----
-@NettyRequest(type = "order")
+@NettyRequest("order.create")
 OrderResponse createOrder(OrderRequest request);
-// Sends: {"type":"order", ...request fields...}
+
+// OrderRequest { productId: "123", quantity: 2 }
+// Sent as: {"type":"order.create","productId":"123","quantity":2}
 ----
 
-=== Named Parameters
+=== Multiple Named Parameters
 
-Use `@Param` for named parameters:
+Use `@Param` for multiple parameters:
 
 [source,java]
 ----
-@NettyRequest(type = "transfer")
+@NettyRequest("transfer.execute")
 TransferResponse transfer(
-    @Param("from") String fromAccount,
-    @Param("to") String toAccount,
+    @Param("fromAccount") String from,
+    @Param("toAccount") String to,
     @Param("amount") BigDecimal amount
 );
-// Sends: {"type":"transfer","from":"...","to":"...","amount":...}
+
+// Sent as: {"type":"transfer.execute","fromAccount":"A","toAccount":"B","amount":100.00}
 ----
 
-== Timeout Configuration
+=== Mixed Parameters
 
-Set timeout at method level:
+Combine object and named parameters:
 
 [source,java]
 ----
-@NettyRequest(type = "slowOperation", timeout = 30000)  // 30 seconds
-SlowResponse slowOperation(SlowRequest request);
+@NettyRequest("order.update")
+OrderResponse updateOrder(
+    @Param("orderId") String orderId,
+    OrderUpdateRequest updates  // Merged into payload
+);
 ----
 
-Or globally in configuration:
+== Return Types
+
+=== Synchronous (Blocking)
+
+[source,java]
+----
+@NettyRequest("user.get")
+User getUser(Long id);  // Blocks until response or timeout
+----
+
+=== Asynchronous (Non-blocking)
+
+[source,java]
+----
+@NettyRequest("user.get")
+CompletableFuture<User> getUserAsync(Long id);
+
+// Usage
+client.getUserAsync(123L)
+    .thenApply(user -> processUser(user))
+    .thenAccept(result -> saveResult(result))
+    .exceptionally(ex -> {
+        handleError(ex);
+        return null;
+    });
+----
+
+=== Void (No Return Value)
+
+[source,java]
+----
+@NettyRequest("event.log")
+void logEvent(Event event);  // Waits for acknowledgment
+
+@NettyRequest(value = "event.fire", oneWay = true)
+void fireEvent(Event event);  // Returns immediately, no acknowledgment
+----
+
+== Timeout Handling
+
+=== Global Timeout
+
+Set in configuration:
 
 [source,yaml]
 ----
@@ -185,5 +319,205 @@ spring:
     clients:
       - name: order-service
         timeout:
-          requestMs: 10000  # Default timeout for all requests
+          requestMs: 10000  # 10 seconds for all requests
+----
+
+=== Per-Method Timeout
+
+Override in annotation:
+
+[source,java]
+----
+@NettyRequest(type = "slow.operation", timeout = 60000)  // 60 seconds
+SlowResponse slowOperation(SlowRequest request);
+----
+
+=== Handling Timeout Exceptions
+
+[source,java]
+----
+try {
+    OrderResponse response = orderClient.createOrder(request);
+} catch (TimeoutException e) {
+    // Request timed out
+    log.warn("Order creation timed out");
+}
+
+// For async calls
+orderClient.createOrderAsync(request)
+    .orTimeout(5, TimeUnit.SECONDS)
+    .exceptionally(ex -> {
+        if (ex instanceof TimeoutException) {
+            log.warn("Async order creation timed out");
+        }
+        return null;
+    });
+----
+
+== Error Handling
+
+=== Server Errors
+
+When the server returns an error response:
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(999L);  // Non-existent user
+} catch (ClientException e) {
+    // Server returned error
+    int code = e.getCode();        // e.g., 404
+    String message = e.getMessage(); // e.g., "User not found"
+}
+----
+
+=== Connection Errors
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(123L);
+} catch (ConnectionException e) {
+    // Failed to connect or connection lost
+    log.error("Connection error: {}", e.getMessage());
+}
+----
+
+=== Timeout Errors
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(123L);
+} catch (TimeoutException e) {
+    // Request timed out
+    log.error("Request timed out after {} ms", e.getTimeoutMs());
+}
+----
+
+== Multiple Clients
+
+You can define multiple clients in the same application:
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: user-service
+        host: user.internal
+        port: 9001
+        profile: tcp-lengthfield-json
+
+      - name: order-service
+        host: order.internal
+        port: 9002
+        profile: tcp-lengthfield-json
+
+      - name: notification-service
+        host: notify.internal
+        port: 9003
+        profile: tcp-lengthfield-json
+        timeout:
+          requestMs: 30000  # Notifications can be slow
+----
+
+[source,java]
+----
+@NettyClient(name = "user-service")
+public interface UserClient {
+    @NettyRequest("user.get")
+    User getUser(Long id);
+}
+
+@NettyClient(name = "order-service")
+public interface OrderClient {
+    @NettyRequest("order.create")
+    OrderResponse createOrder(OrderRequest request);
+}
+
+@NettyClient(name = "notification-service")
+public interface NotificationClient {
+    @NettyRequest(value = "notify.send", oneWay = true)
+    void sendNotification(Notification notification);
+}
+----
+
+== Best Practices
+
+=== 1. Use Async for Non-Critical Paths
+
+[source,java]
+----
+// Good: Non-blocking notification
+notificationClient.sendNotificationAsync(notification)
+    .exceptionally(ex -> {
+        log.warn("Notification failed, will retry later", ex);
+        return null;
+    });
+
+// Continue processing without waiting
+return orderResponse;
+----
+
+=== 2. Set Appropriate Timeouts
+
+[source,java]
+----
+// Fast operations: short timeout
+@NettyRequest(type = "cache.get", timeout = 1000)
+CacheEntry getCached(String key);
+
+// Slow operations: longer timeout
+@NettyRequest(type = "report.generate", timeout = 120000)
+Report generateReport(ReportRequest request);
+----
+
+=== 3. Handle Errors Gracefully
+
+[source,java]
+----
+public User getUserWithFallback(Long id) {
+    try {
+        return userClient.getUser(id);
+    } catch (TimeoutException e) {
+        log.warn("User service timeout, using cached data");
+        return userCache.get(id);
+    } catch (ConnectionException e) {
+        log.error("User service unavailable");
+        throw new ServiceUnavailableException("User service down");
+    }
+}
+----
+
+=== 4. Use Fire-and-Forget for Events
+
+[source,java]
+----
+// Don't wait for acknowledgment of non-critical events
+@NettyRequest(value = "analytics.track", oneWay = true)
+void trackEvent(AnalyticsEvent event);
+----
+
+=== 5. Group Related Operations
+
+[source,java]
+----
+@NettyClient(name = "user-service")
+public interface UserClient {
+    @NettyRequest("user.create")
+    User createUser(CreateUserRequest request);
+
+    @NettyRequest("user.get")
+    User getUser(Long id);
+
+    @NettyRequest("user.update")
+    User updateUser(Long id, UpdateUserRequest request);
+
+    @NettyRequest("user.delete")
+    void deleteUser(Long id);
+
+    @NettyRequest("user.search")
+    List<User> searchUsers(UserSearchCriteria criteria);
+}
 ----

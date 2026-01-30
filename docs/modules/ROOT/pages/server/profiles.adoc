@@ -1,75 +1,142 @@
 = Profiles
 :page-pagination:
 
-Profiles define the protocol stack for a server. A profile configures the Netty pipeline with appropriate handlers for a specific protocol.
+Profiles define the complete protocol stack for a server, including message framing, encoding/decoding, and protocol-specific handlers. This page explains built-in profiles and how to create custom ones.
+
+== What is a Profile?
+
+A profile configures the Netty `ChannelPipeline` with handlers appropriate for a specific protocol. It handles:
+
+* **Message Framing** - How to determine message boundaries (length prefix, delimiter, etc.)
+* **Codec** - How to serialize/deserialize messages (JSON, Protobuf, etc.)
+* **Protocol Handlers** - Protocol-specific handlers (HTTP codec, WebSocket handshake, etc.)
 
 == Built-in Profiles
 
-[cols="2,1,3"]
+[cols="2,1,1,3"]
 |===
-|Profile |Transport |Description
+|Profile |Transport |Codec |Description
 
 |`tcp-lengthfield-json`
 |TCP
-|4-byte length prefix + JSON codec
+|JSON
+|4-byte length prefix framing with JSON body
 
 |`tcp-line`
 |TCP
-|Line-based framing (CRLF)
+|Text
+|Line-based framing (newline delimiter)
 
 |`tcp-raw`
 |TCP
-|Raw TCP without framing
+|Raw
+|No framing, raw bytes
 
 |`http1-json`
 |HTTP
-|HTTP/1.1 with JSON codec
+|JSON
+|HTTP/1.1 protocol with JSON body
 
 |`websocket`
 |HTTP
-|WebSocket with JSON codec
+|JSON
+|WebSocket protocol with JSON messages
 
 |`udp-json`
 |UDP
-|UDP datagram with JSON codec
+|JSON
+|UDP datagrams with JSON body
 |===
 
-== Profile Selection
+== TCP Length-Field JSON Profile
 
-Select a profile in your server configuration:
+**Profile name:** `tcp-lengthfield-json`
+
+This is the most common profile for TCP-based RPC and messaging.
+
+=== Wire Format
+
+[source,text]
+----
++----------------+------------------+
+| Length (4B)    |   JSON Body      |
+| Big-endian int |   UTF-8 bytes    |
++----------------+------------------+
+|<-- 4 bytes --->|<-- N bytes ----->|
+
+Total frame size = 4 + N bytes
+----
+
+=== Example Message
+
+To send `{"type":"ping"}`:
+
+[source,text]
+----
+Bytes: 00 00 00 0F 7B 22 74 79 70 65 22 3A 22 70 69 6E 67 22 7D
+       |---------|  |------------------------------------------|
+       Length=15    JSON: {"type":"ping"}
+----
+
+=== Configuration
 
 [source,yaml]
 ----
 spring:
   netty:
     servers:
-      - name: my-server
+      - name: tcp-server
         transport: TCP
         port: 9000
-        profile: tcp-lengthfield-json  # <-- Select profile here
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
 ----
 
-== TCP Length-Field JSON
-
-The `tcp-lengthfield-json` profile uses a 4-byte length prefix followed by JSON body:
+=== Pipeline Structure
 
 [source,text]
 ----
-+--------+------------------+
-| Length |   JSON Body      |
-| 4 bytes|   N bytes        |
-+--------+------------------+
+ChannelPipeline:
+├── LengthFieldBasedFrameDecoder  (inbound: extract frames)
+├── LengthFieldPrepender          (outbound: add length prefix)
+├── DispatcherHandler             (route to handlers)
+└── ExceptionHandler              (error handling)
 ----
 
-Message example:
-[source,json]
+=== Java Client Example
+
+[source,java]
 ----
-{"type":"ping","data":"hello"}
+public class TcpClient {
+    public static void main(String[] args) throws Exception {
+        try (Socket socket = new Socket("localhost", 9000);
+             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+             DataInputStream in = new DataInputStream(socket.getInputStream())) {
+
+            // Send message
+            byte[] message = "{\"type\":\"ping\"}".getBytes(StandardCharsets.UTF_8);
+            out.writeInt(message.length);  // 4-byte length prefix (big-endian)
+            out.write(message);
+            out.flush();
+
+            // Read response
+            int length = in.readInt();
+            byte[] response = new byte[length];
+            in.readFully(response);
+            System.out.println(new String(response, StandardCharsets.UTF_8));
+        }
+    }
+}
 ----
 
-== TCP Line-Based
+== TCP Line Profile
 
-The `tcp-line` profile uses newline (`\n` or `\r\n`) as message delimiter:
+**Profile name:** `tcp-line`
+
+Text-based protocol using newline as message delimiter. Useful for telnet-style protocols or debugging.
+
+=== Wire Format
 
 [source,text]
 ----
@@ -78,60 +145,365 @@ Message 2\r\n
 Message 3\r\n
 ----
 
-== HTTP/1.1 JSON
+Each message is terminated by `\r\n` (CRLF) or `\n` (LF).
 
-The `http1-json` profile handles standard HTTP requests with JSON body:
-
-[source,http]
-----
-POST /api/users HTTP/1.1
-Content-Type: application/json
-
-{"name":"John","email":"john@example.com"}
-----
-
-== WebSocket
-
-The `websocket` profile handles WebSocket connections:
-
-1. HTTP upgrade handshake
-2. WebSocket frames (text/binary)
-3. Close frame handling
-
-== Custom Profile
-
-Create a custom profile by implementing the `Profile` interface:
-
-[source,java]
-----
-@Component
-public class MyCustomProfile implements Profile {
-
-    @Override
-    public String getName() {
-        return "my-custom-profile";
-    }
-
-    @Override
-    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        pipeline.addLast("myDecoder", new MyDecoder());
-        pipeline.addLast("myEncoder", new MyEncoder());
-    }
-
-    @Override
-    public String getProtocolType() {
-        return NettyContext.PROTOCOL_TCP;  // or PROTOCOL_HTTP, PROTOCOL_WEBSOCKET, PROTOCOL_UDP
-    }
-}
-----
-
-Then use it in configuration:
+=== Configuration
 
 [source,yaml]
 ----
 spring:
   netty:
     servers:
-      - name: my-server
-        profile: my-custom-profile
+      - name: line-server
+        transport: TCP
+        port: 9001
+        profile: tcp-line
+        routing:
+          mode: MESSAGE_TYPE
 ----
+
+=== Testing with Telnet
+
+[source,bash]
+----
+$ telnet localhost 9001
+Trying 127.0.0.1...
+Connected to localhost.
+{"type":"ping"}
+{"type":"pong","timestamp":1706012345678}
+----
+
+== TCP Raw Profile
+
+**Profile name:** `tcp-raw`
+
+No framing - receives raw bytes. Use this when you need full control over the protocol.
+
+WARNING: Without framing, you must handle message boundaries yourself in your handlers.
+
+=== Configuration
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: raw-server
+        transport: TCP
+        port: 9002
+        profile: tcp-raw
+----
+
+=== Handler for Raw Bytes
+
+[source,java]
+----
+@NettyMessageController
+public class RawHandler {
+
+    @NettyMessageMapping("unknown")  // Catches all raw messages
+    public byte[] handleRaw(byte[] data, NettyContext context) {
+        // Process raw bytes
+        return processBytes(data);
+    }
+}
+----
+
+== HTTP/1.1 JSON Profile
+
+**Profile name:** `http1-json`
+
+Standard HTTP/1.1 protocol with JSON request/response bodies.
+
+=== Configuration
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: http-server
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH
+----
+
+=== Pipeline Structure
+
+[source,text]
+----
+ChannelPipeline:
+├── HttpServerCodec          (HTTP encoding/decoding)
+├── HttpObjectAggregator     (combine HTTP message parts)
+├── DispatcherHandler        (route to controllers)
+└── ExceptionHandler         (return HTTP error responses)
+----
+
+=== Request/Response Format
+
+Request:
+[source,http]
+----
+POST /api/users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{"name":"John","email":"john@example.com"}
+----
+
+Response:
+[source,http]
+----
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 45
+
+{"id":1,"name":"John","email":"john@example.com"}
+----
+
+== WebSocket Profile
+
+**Profile name:** `websocket`
+
+WebSocket protocol for real-time bidirectional communication.
+
+=== Configuration
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: ws-server
+        transport: HTTP        # WebSocket starts as HTTP
+        port: 8081
+        profile: websocket
+        routing:
+          mode: WS_PATH
+----
+
+=== Connection Flow
+
+[source,text]
+----
+1. HTTP Upgrade Request
+   GET /ws/chat HTTP/1.1
+   Upgrade: websocket
+   Connection: Upgrade
+   Sec-WebSocket-Key: ...
+   Sec-WebSocket-Version: 13
+
+2. HTTP Upgrade Response
+   HTTP/1.1 101 Switching Protocols
+   Upgrade: websocket
+   Connection: Upgrade
+   Sec-WebSocket-Accept: ...
+
+3. WebSocket Frames
+   ← Text Frame: {"text":"Hello"}
+   → Text Frame: {"text":"Hi there"}
+   ...
+   ← Close Frame
+----
+
+=== Pipeline Structure
+
+[source,text]
+----
+ChannelPipeline:
+├── HttpServerCodec          (initial HTTP for handshake)
+├── HttpObjectAggregator     (aggregate handshake request)
+├── WebSocketServerProtocolHandler (handshake + frame handling)
+├── DispatcherHandler        (route WS events)
+└── ExceptionHandler         (close frame on error)
+----
+
+== UDP JSON Profile
+
+**Profile name:** `udp-json`
+
+UDP datagrams with JSON payload. Each datagram is a complete message.
+
+=== Configuration
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: udp-server
+        transport: UDP
+        port: 7000
+        profile: udp-json
+        routing:
+          mode: MESSAGE_TYPE
+----
+
+=== Characteristics
+
+* No connection establishment
+* No guaranteed delivery
+* No ordering guarantee
+* Each datagram is independent
+* Maximum size limited (typically 65535 bytes, but recommended < 1500 for network MTU)
+
+=== Testing with netcat
+
+[source,bash]
+----
+# Send UDP message
+echo '{"type":"ping"}' | nc -u localhost 7000
+----
+
+== Custom Profile
+
+Create a custom profile by implementing the `Profile` interface.
+
+=== Profile Interface
+
+[source,java]
+----
+public interface Profile {
+    /**
+     * Unique profile name used in configuration.
+     */
+    String getName();
+
+    /**
+     * Configure the channel pipeline.
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * Return the protocol type for error handling.
+     */
+    default String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
+
+    /**
+     * Whether this profile supports the dispatcher handler.
+     */
+    default boolean supportsDispatcher() {
+        return true;
+    }
+}
+----
+
+=== Example: Protobuf Profile
+
+[source,java]
+----
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+import com.childrengreens.netty.spring.boot.context.profile.Profile;
+import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.codec.protobuf.ProtobufDecoder;
+import io.netty.handler.codec.protobuf.ProtobufEncoder;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ProtobufProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "tcp-lengthfield-protobuf";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // Frame decoder: 4-byte length prefix
+        pipeline.addLast("frameDecoder",
+            new LengthFieldBasedFrameDecoder(1048576, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder",
+            new LengthFieldPrepender(4));
+
+        // Protobuf codec
+        pipeline.addLast("protobufDecoder",
+            new ProtobufDecoder(MyMessage.getDefaultInstance()));
+        pipeline.addLast("protobufEncoder",
+            new ProtobufEncoder());
+    }
+
+    @Override
+    public String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
+}
+----
+
+Usage:
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: protobuf-server
+        transport: TCP
+        port: 9000
+        profile: tcp-lengthfield-protobuf
+----
+
+=== Example: Custom Delimiter Profile
+
+[source,java]
+----
+@Component
+public class PipeDelimitedProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "tcp-pipe-delimited";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // Use pipe character as delimiter
+        pipeline.addLast("frameDecoder",
+            new DelimiterBasedFrameDecoder(8192,
+                Unpooled.wrappedBuffer(new byte[]{'|'})));
+        pipeline.addLast("stringDecoder",
+            new StringDecoder(StandardCharsets.UTF_8));
+        pipeline.addLast("stringEncoder",
+            new StringEncoder(StandardCharsets.UTF_8));
+    }
+}
+----
+
+== Profile Selection Guide
+
+[cols="2,4"]
+|===
+|Use Case |Recommended Profile
+
+|High-performance RPC
+|`tcp-lengthfield-json`
+
+|Game server
+|`tcp-lengthfield-json` or custom binary
+
+|Debug/testing
+|`tcp-line`
+
+|REST API
+|`http1-json`
+
+|Real-time chat
+|`websocket`
+
+|Live notifications
+|`websocket`
+
+|Metrics collection
+|`udp-json`
+
+|Logging ingestion
+|`udp-json` or `tcp-line`
+
+|Legacy system integration
+|Custom profile
+|===

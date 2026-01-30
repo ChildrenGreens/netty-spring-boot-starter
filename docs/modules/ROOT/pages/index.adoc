@@ -1,54 +1,178 @@
 = Netty Spring Boot Starter
 :page-layout: home
 
-A comprehensive Spring Boot starter for building high-performance network applications with Netty.
+A comprehensive Spring Boot starter for building high-performance network applications with Netty. Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and annotation-based routing.
+
+== Why Netty Spring Boot Starter?
+
+Building network applications with raw Netty requires significant boilerplate code for server lifecycle management, protocol handling, and Spring integration. This starter eliminates that complexity:
+
+[cols="2,3,3"]
+|===
+|Challenge |Raw Netty |With This Starter
+
+|Server Setup
+|50+ lines of bootstrap code
+|5 lines of YAML
+
+|Protocol Handling
+|Manual pipeline configuration
+|One-line profile selection
+
+|Request Routing
+|Custom handler logic
+|`@NettyMessageMapping("type")`
+
+|Spring Integration
+|Manual bean wiring
+|Full auto-configuration
+
+|Client Connection
+|Manual channel management
+|`@NettyClient` interface proxy
+|===
 
 == Highlights
 
-* *One Configuration, Multiple Protocols* - Start TCP/HTTP/WebSocket/UDP servers with a single YAML configuration
-* *Annotation-Based Routing* - Develop handlers like Spring MVC / Spring Messaging
-* *Profile-Based Protocol Stacks* - One-click protocol setup, with Feature-based capability overlay
-* *Client Support* - Declarative client interfaces with connection pooling, reconnection, and heartbeat
-* *Production Ready* - Built-in observability (metrics/health), graceful shutdown support
-* *Highly Extensible* - Advanced users can extend via Configurer/Codec/RouteResolver
+*One Configuration, Multiple Protocols*::
+Start TCP/HTTP/WebSocket/UDP servers with a single YAML configuration. No code changes needed to switch protocols.
 
-== Architecture
+*Annotation-Based Routing*::
+Develop handlers like Spring MVC with `@NettyController`, `@NettyMessageMapping`, and parameter annotations like `@PathVar`, `@Body`, `@Query`.
+
+*Profile-Based Protocol Stacks*::
+Pre-configured protocol profiles (`tcp-lengthfield-json`, `http1-json`, `websocket`, etc.) handle framing and codec automatically.
+
+*Declarative Client*::
+Define client interfaces with `@NettyClient` annotation. The framework generates proxies with connection pooling, automatic reconnection, and heartbeat.
+
+*Production Ready*::
+Built-in observability with Micrometer metrics, health checks, and Actuator endpoints. Graceful shutdown support included.
+
+*Highly Extensible*::
+Extend with custom `Profile`, `NettyCodec`, `FeatureProvider`, or `NettyPipelineConfigurer` for advanced use cases.
+
+== Architecture Overview
 
 [source,text]
 ----
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           application.yml                               │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │ spring.netty.servers[*]    │    │ spring.netty.clients[*]         │ │
-│  │    Server Configuration     │    │    Client Configuration         │ │
-│  └─────────────────────────────┘    └─────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
-                    │                              │
-                    ▼                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      netty-spring-boot-context                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                       Shared Components                           │  │
-│  │  Codec │ Profile │ InboundMessage │ OutboundMessage │ NettyContext │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
-                    │                              │
-                    ▼                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           Netty Runtime                                 │
-│  ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────┐  │
-│  │  BossGroup  │ →  │ WorkerGroup │ →  │  ChannelPipeline           │  │
-│  └─────────────┘    └─────────────┘    │  (Staged Handlers)         │  │
-│                                         └────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              application.yml                                 │
+│  ┌──────────────────────────────┐    ┌───────────────────────────────────┐  │
+│  │ spring.netty.servers[*]      │    │ spring.netty.clients[*]           │  │
+│  │   - name: tcp-server         │    │   - name: order-service           │  │
+│  │     port: 9000               │    │     host: 127.0.0.1               │  │
+│  │     profile: tcp-json        │    │     port: 9000                    │  │
+│  └──────────────────────────────┘    └───────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                     │                                │
+                     ▼                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        netty-spring-boot-context                             │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                         Shared Components                            │    │
+│  │   NettyCodec (JSON/Protobuf)  │  Profile  │  InboundMessage         │    │
+│  │   OutboundMessage  │  NettyContext  │  ArgumentResolver             │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌───────────────────────────┐      ┌────────────────────────────────────┐  │
+│  │     Server Components      │      │        Client Components           │  │
+│  │  ┌─────────────────────┐  │      │  ┌──────────────────────────────┐  │  │
+│  │  │ NettyServerOrchestra│  │      │  │ NettyClientOrchestrator      │  │  │
+│  │  │ PipelineAssembler   │  │      │  │ ConnectionPool               │  │  │
+│  │  │ DispatcherHandler   │  │      │  │ ReconnectManager             │  │  │
+│  │  │ Router & Dispatcher │  │      │  │ HeartbeatManager             │  │  │
+│  │  │ @NettyController    │  │      │  │ @NettyClient Proxy           │  │  │
+│  │  └─────────────────────┘  │      │  └──────────────────────────────┘  │  │
+│  └───────────────────────────┘      └────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                     │                                │
+                     ▼                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        netty-spring-boot-actuator                            │
+│    Metrics (Micrometer)  │  Health Checks  │  /actuator/netty Endpoint      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             Netty Runtime                                    │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────────────┐  │
+│  │  BossGroup  │ ─► │ WorkerGroup │ ─► │       ChannelPipeline           │  │
+│  │  (Accept)   │    │  (I/O)      │    │  SSL → Idle → Frame → Codec →   │  │
+│  └─────────────┘    └─────────────┘    │  Dispatcher → ExceptionHandler  │  │
+│                                         └─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ----
+
+== Module Structure
+
+[source,text]
+----
+netty-spring-boot/
+├── netty-spring-boot-context/        # Core: annotations, handlers, routing, codec
+├── netty-spring-boot-actuator/       # Metrics, health checks, endpoints
+├── netty-spring-boot-autoconfigure/  # Spring Boot auto-configuration
+└── netty-spring-boot-starter/        # Starter POM (dependency aggregation)
+----
+
+[cols="2,4"]
+|===
+|Module |Description
+
+|`netty-spring-boot-context`
+|Core APIs including annotations (`@NettyController`, `@NettyClient`), message abstractions (`InboundMessage`, `OutboundMessage`), codec system, profile system, routing, and pipeline assembly.
+
+|`netty-spring-boot-actuator`
+|Spring Boot Actuator integration providing Micrometer metrics, health indicators, and management endpoints for monitoring Netty servers and clients.
+
+|`netty-spring-boot-autoconfigure`
+|Auto-configuration classes that automatically configure Netty servers and clients based on `application.yml` properties.
+
+|`netty-spring-boot-starter`
+|Starter POM that aggregates all necessary dependencies. Add this single dependency to use the framework.
+|===
+
+== Supported Protocols
+
+[cols="1,2,3"]
+|===
+|Protocol |Profile |Use Case
+
+|TCP
+|`tcp-lengthfield-json`
+|High-performance RPC, game servers, IoT
+
+|TCP
+|`tcp-line`
+|Text-based protocols, telnet-style
+
+|HTTP/1.1
+|`http1-json`
+|REST APIs, webhooks
+
+|WebSocket
+|`websocket`
+|Real-time messaging, live updates
+
+|UDP
+|`udp-json`
+|Low-latency messaging, broadcasting
+|===
 
 == Requirements
 
-* Java {java-version}+
-* Spring Boot {spring-boot-version}+
-* Netty 4.1+
+* Java {java-version} or higher
+* Spring Boot {spring-boot-version} or higher
+* Netty 4.1.x (managed by Spring Boot)
+
+== Quick Links
+
+* xref:getting-started.adoc[Getting Started] - Create your first Netty server in 5 minutes
+* xref:configuration.adoc[Configuration Reference] - All available configuration properties
+* xref:server/handlers.adoc[Handler Guide] - Learn about different handler types
+* xref:client/usage.adoc[Client Guide] - Create declarative Netty clients
 
 == License
 
-Apache License 2.0
+This project is licensed under the https://www.apache.org/licenses/LICENSE-2.0[Apache License 2.0].

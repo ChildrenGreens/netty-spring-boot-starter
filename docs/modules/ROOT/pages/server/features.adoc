@@ -1,7 +1,26 @@
 = Features
 :page-pagination:
 
-Features are optional capabilities that can be added to a server's pipeline. Features have an order that determines their position in the pipeline.
+Features are optional pipeline components that add cross-cutting capabilities like SSL encryption, rate limiting, idle detection, and logging. This page covers all built-in features and how to create custom ones.
+
+== Feature Overview
+
+Features are applied to the pipeline in a specific order:
+
+[source,text]
+----
+ChannelPipeline:
+├── [Order 10]  SSL/TLS Handler
+├── [Order 10]  Connection Limit Handler
+├── [Order 50]  Logging Handler
+├── [Order 50]  Rate Limit Handler
+├── [Order 150] Idle State Handler
+├── Profile Handlers (framing, codec)
+├── Dispatcher Handler
+└── Exception Handler
+----
+
+Lower order numbers are added first (closer to the network). Higher order numbers are added later (closer to the application).
 
 == Built-in Features
 
@@ -11,28 +30,30 @@ Features are optional capabilities that can be added to a server's pipeline. Fea
 
 |`ssl`
 |10
-|SSL/TLS encryption
+|SSL/TLS encryption for secure communication
 
 |`connectionLimit`
 |10
-|Limit maximum connections
+|Limit maximum concurrent connections
 
 |`logging`
 |50
-|Log all inbound/outbound data
+|Log all inbound/outbound traffic
 
 |`rateLimit`
 |50
-|Token bucket rate limiting
+|Token bucket rate limiting per connection
 
 |`idle`
 |150
-|Idle connection detection
+|Detect and close idle connections
 |===
 
-== SSL/TLS
+== SSL/TLS Feature
 
-Enable SSL encryption:
+Enables encrypted communication using SSL/TLS.
+
+=== Configuration
 
 [source,yaml]
 ----
@@ -40,16 +61,59 @@ spring:
   netty:
     servers:
       - name: secure-server
+        transport: TCP
+        port: 9443
+        profile: tcp-lengthfield-json
         features:
           ssl:
             enabled: true
-            certPath: /path/to/cert.pem
-            keyPath: /path/to/key.pem
+            certPath: /etc/ssl/server.crt      # <1>
+            keyPath: /etc/ssl/server.key       # <2>
+----
+<1> X.509 certificate file in PEM format
+<2> Private key file in PEM format
+
+=== Generating Self-Signed Certificate (Development)
+
+[source,bash]
+----
+# Generate private key and certificate
+openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
+    -days 365 -nodes -subj "/CN=localhost"
+
+# Verify certificate
+openssl x509 -in server.crt -text -noout
 ----
 
-== Connection Limit
+=== Client Connection (Java)
 
-Limit maximum concurrent connections:
+[source,java]
+----
+// Java client connecting to SSL server
+SSLContext sslContext = SSLContext.getInstance("TLS");
+sslContext.init(null, trustAllCerts, new SecureRandom());
+
+SSLSocketFactory factory = sslContext.getSocketFactory();
+SSLSocket socket = (SSLSocket) factory.createSocket("localhost", 9443);
+socket.startHandshake();
+
+// Now use socket.getInputStream() and socket.getOutputStream()
+----
+
+=== Production Recommendations
+
+WARNING: Do not use self-signed certificates in production.
+
+* Use certificates from a trusted Certificate Authority (CA)
+* Use Let's Encrypt for free, automated certificates
+* Store private keys securely (file permissions, secrets management)
+* Rotate certificates before expiration
+
+== Connection Limit Feature
+
+Limits the maximum number of concurrent connections to prevent resource exhaustion.
+
+=== Configuration
 
 [source,yaml]
 ----
@@ -60,12 +124,34 @@ spring:
         features:
           connectionLimit:
             enabled: true
-            maxConnections: 10000
+            maxConnections: 10000       # <1>
+----
+<1> Maximum concurrent connections allowed
+
+=== Behavior
+
+When the limit is reached:
+
+1. New connections are immediately closed
+2. A warning is logged
+3. Existing connections are not affected
+
+[source,text]
+----
+WARN  Connection limit reached (10000), rejecting new connection from /192.168.1.100:54321
 ----
 
-== Logging
+=== Use Cases
 
-Log all network traffic (useful for debugging):
+* Prevent server overload under traffic spikes
+* Protect against connection-based DoS attacks
+* Ensure fair resource allocation
+
+== Logging Feature
+
+Logs all network traffic for debugging and monitoring.
+
+=== Configuration
 
 [source,yaml]
 ----
@@ -76,29 +162,101 @@ spring:
         features:
           logging:
             enabled: true
-            level: DEBUG   # TRACE, DEBUG, INFO, WARN, ERROR
+            level: DEBUG           # <1>
+----
+<1> Log level: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`
+
+=== Log Output Example
+
+[source,text]
+----
+DEBUG [nioEventLoopGroup-3-1] LoggingHandler - [id: 0x12345678, L:/0.0.0.0:9000 - R:/192.168.1.100:54321] RECEIVED:
+         +-------------------------------------------------+
+         |  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f |
++--------+-------------------------------------------------+----------------+
+|00000000| 7b 22 74 79 70 65 22 3a 22 70 69 6e 67 22 7d    |{"type":"ping"} |
++--------+-------------------------------------------------+----------------+
 ----
 
-== Rate Limiting
+=== Log Levels
 
-Token bucket rate limiting:
+[cols="1,4"]
+|===
+|Level |Content
+
+|`TRACE`
+|Hex dump of all bytes + event details
+
+|`DEBUG`
+|Hex dump of data + connection events
+
+|`INFO`
+|Connection events only (connect, disconnect)
+
+|`WARN`
+|Warnings and errors only
+
+|`ERROR`
+|Errors only
+|===
+
+WARNING: `TRACE` and `DEBUG` levels can significantly impact performance and disk usage. Use only for debugging.
+
+== Rate Limit Feature
+
+Implements token bucket rate limiting per connection to prevent abuse.
+
+=== Configuration
 
 [source,yaml]
 ----
 spring:
   netty:
     servers:
-      - name: my-server
+      - name: api-server
         features:
           rateLimit:
             enabled: true
-            requestsPerSecond: 100
-            burstSize: 150
+            requestsPerSecond: 100     # <1>
+            burstSize: 150             # <2>
+----
+<1> Sustained rate (tokens added per second)
+<2> Maximum burst (bucket capacity)
+
+=== Token Bucket Algorithm
+
+[source,text]
+----
+Bucket Capacity: 150 tokens
+Refill Rate: 100 tokens/second
+
+Time 0.0s: Bucket = 150 (full)
+           Client sends 50 requests → Bucket = 100
+Time 0.1s: Bucket = 110 (refilled 10 tokens)
+           Client sends 20 requests → Bucket = 90
+Time 0.5s: Bucket = 130 (refilled 40 tokens)
+           Client sends 140 requests → 130 allowed, 10 rejected
 ----
 
-== Idle Detection
+=== Behavior When Limited
 
-Detect idle connections and trigger events:
+When rate limit is exceeded:
+
+1. Request is rejected
+2. Connection remains open
+3. Client receives an error response
+
+=== Use Cases
+
+* API rate limiting
+* Prevent abuse from single clients
+* Protect backend services from overload
+
+== Idle Detection Feature
+
+Detects idle connections and can trigger actions (typically close the connection).
+
+=== Configuration
 
 [source,yaml]
 ----
@@ -109,35 +267,160 @@ spring:
         features:
           idle:
             enabled: true
-            readSeconds: 60    # No read for 60s
-            writeSeconds: 30   # No write for 30s
-            allSeconds: 0      # No activity (0 = disabled)
+            readSeconds: 60        # <1>
+            writeSeconds: 30       # <2>
+            allSeconds: 0          # <3>
+----
+<1> Close if no data read for 60 seconds
+<2> Close if no data written for 30 seconds
+<3> Close if no activity for N seconds (0 = disabled)
+
+=== Idle Types
+
+[cols="2,4"]
+|===
+|Type |Triggered When
+
+|Read Idle
+|No data received from client for `readSeconds`
+
+|Write Idle
+|No data sent to client for `writeSeconds`
+
+|All Idle
+|No data sent or received for `allSeconds`
+|===
+
+=== Common Configurations
+
+.Long-polling server (keep connections alive)
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    readSeconds: 300    # 5 minutes
+    writeSeconds: 0     # No write timeout
+    allSeconds: 0
 ----
 
-== Feature Ordering
+.WebSocket server (detect dead connections)
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    allSeconds: 60      # Close if no activity for 1 minute
+----
 
-Features are applied in order:
+.RPC server (short-lived requests)
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    readSeconds: 30     # Close slow clients
+    writeSeconds: 0
+----
 
-1. Order < 200: SSL, ConnectionLimit, Logging, RateLimit, Idle
-2. Profile handlers (framing, codec)
-3. Order >= 200: Business features
-4. DispatcherHandler
-5. ExceptionHandler
+== Combining Features
+
+Features can be combined for comprehensive protection:
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: production-server
+        transport: TCP
+        port: 9443
+        profile: tcp-lengthfield-json
+        features:
+          # Encryption
+          ssl:
+            enabled: true
+            certPath: /etc/ssl/server.crt
+            keyPath: /etc/ssl/server.key
+
+          # Connection management
+          connectionLimit:
+            enabled: true
+            maxConnections: 50000
+
+          # Rate limiting
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 1000
+            burstSize: 2000
+
+          # Idle timeout
+          idle:
+            enabled: true
+            readSeconds: 120
+            writeSeconds: 0
+            allSeconds: 0
+
+          # Debug logging (disable in production)
+          logging:
+            enabled: false
+----
 
 == Custom Feature
 
-Create a custom feature by implementing `FeatureProvider`:
+Create custom features by implementing `FeatureProvider`.
+
+=== FeatureProvider Interface
 
 [source,java]
 ----
-@Component
-public class MyFeatureProvider implements FeatureProvider {
+public interface FeatureProvider {
+    /**
+     * Unique feature name.
+     */
+    String getName();
 
-    public static final int ORDER = 100;
+    /**
+     * Pipeline order (lower = closer to network).
+     */
+    int getOrder();
+
+    /**
+     * Check if feature is enabled for this server.
+     */
+    boolean isEnabled(ServerSpec serverSpec);
+
+    /**
+     * Configure the pipeline.
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+}
+----
+
+=== Example: IP Whitelist Feature
+
+[source,java]
+----
+import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
+import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.ipfilter.IpFilterRule;
+import io.netty.handler.ipfilter.IpFilterRuleType;
+import io.netty.handler.ipfilter.RuleBasedIpFilter;
+import org.springframework.stereotype.Component;
+
+import java.net.InetSocketAddress;
+import java.util.List;
+import java.util.Map;
+
+@Component
+public class IpWhitelistFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 5;  // Before SSL
 
     @Override
     public String getName() {
-        return "my-feature";
+        return "ipWhitelist";
     }
 
     @Override
@@ -147,13 +430,136 @@ public class MyFeatureProvider implements FeatureProvider {
 
     @Override
     public boolean isEnabled(ServerSpec serverSpec) {
-        // Check if feature is enabled in config
-        return serverSpec.getFeatures().containsKey("myFeature");
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> config = (Map<String, Object>) features.get("ipWhitelist");
+        return config != null && Boolean.TRUE.equals(config.get("enabled"));
     }
 
     @Override
     public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        pipeline.addLast("myHandler", new MyHandler());
+        Map<String, Object> config = (Map<String, Object>)
+            serverSpec.getFeatures().get("ipWhitelist");
+        List<String> allowedIps = (List<String>) config.get("allowedIps");
+
+        IpFilterRule[] rules = allowedIps.stream()
+            .map(ip -> new IpFilterRule() {
+                @Override
+                public boolean matches(InetSocketAddress remoteAddress) {
+                    return remoteAddress.getAddress().getHostAddress().equals(ip);
+                }
+                @Override
+                public IpFilterRuleType ruleType() {
+                    return IpFilterRuleType.ACCEPT;
+                }
+            })
+            .toArray(IpFilterRule[]::new);
+
+        pipeline.addLast("ipFilter", new RuleBasedIpFilter(rules));
     }
 }
 ----
+
+Usage:
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: admin-server
+        features:
+          ipWhitelist:
+            enabled: true
+            allowedIps:
+              - "192.168.1.100"
+              - "10.0.0.0"
+----
+
+=== Example: Metrics Feature
+
+[source,java]
+----
+@Component
+public class MetricsFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 180;  // After idle, before dispatcher
+
+    private final MeterRegistry meterRegistry;
+
+    public MetricsFeatureProvider(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    @Override
+    public String getName() {
+        return "metrics";
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> config = (Map<String, Object>) features.get("metrics");
+        return config != null && Boolean.TRUE.equals(config.get("enabled"));
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        String serverName = serverSpec.getName();
+        pipeline.addLast("metricsHandler",
+            new MetricsHandler(meterRegistry, serverName));
+    }
+}
+----
+
+== Feature Order Reference
+
+[cols="1,2,4"]
+|===
+|Order |Feature |Reason
+
+|5
+|IP Filter
+|Block unwanted IPs before any processing
+
+|10
+|SSL
+|Decrypt before other handlers see data
+
+|10
+|Connection Limit
+|Reject early to save resources
+
+|50
+|Logging
+|Log decrypted data
+
+|50
+|Rate Limit
+|Limit after connection established
+
+|150
+|Idle Detection
+|Detect idle after rate limiting
+
+|200+
+|Custom Business Features
+|Application-specific features
+
+|_Profile_
+|Framing, Codec
+|Protocol-specific handlers
+
+|_System_
+|Dispatcher
+|Route to handlers
+
+|_System_
+|Exception Handler
+|Handle errors
+|===

@@ -1,28 +1,72 @@
 = Configuration Reference
 :page-pagination:
 
-This page documents all available configuration options for Netty Spring Boot Starter.
+This page documents all available configuration properties for Netty Spring Boot Starter.
 
-== Enable/Disable Configuration
+== Configuration Structure
 
-[cols="2,1,3"]
+All configuration is under the `spring.netty` prefix:
+
+[source,yaml]
+----
+spring:
+  netty:
+    enabled: true                    # Master switch
+    server:
+      enabled: true                  # Server components switch
+    client:
+      enabled: true                  # Client components switch
+    defaults:                        # Default settings for all servers
+      ...
+    servers:                         # Server definitions
+      - name: server1
+        ...
+    clients:                         # Client definitions
+      - name: client1
+        ...
+    observability:                   # Metrics and health
+      ...
+----
+
+== Enable/Disable Components
+
+Control which components are active:
+
+[cols="3,1,4"]
 |===
 |Property |Default |Description
 
 |`spring.netty.enabled`
 |`true`
-|Enable/disable all Netty functionality
+|Master switch for all Netty functionality. When `false`, no Netty beans are created.
 
 |`spring.netty.server.enabled`
 |`true`
-|Enable/disable server components only
+|Enable/disable server components. Set to `false` for client-only applications.
 
 |`spring.netty.client.enabled`
 |`true`
-|Enable/disable client components only
+|Enable/disable client components. Set to `false` for server-only applications.
 |===
 
-== Defaults Configuration
+.Client-only application example
+[source,yaml]
+----
+spring:
+  netty:
+    server:
+      enabled: false    # Disable server
+    client:
+      enabled: true     # Enable client (default)
+    clients:
+      - name: my-service
+        host: remote-server.example.com
+        port: 9000
+----
+
+== Default Settings
+
+Default settings apply to all servers unless overridden:
 
 [source,yaml]
 ----
@@ -30,82 +74,475 @@ spring:
   netty:
     defaults:
       threads:
-        boss: 1
-        worker: 0              # 0 = CPU cores * 2
+        boss: 1                      # <1>
+        worker: 0                    # <2>
       transport:
-        prefer: AUTO           # AUTO/NIO/EPOLL/KQUEUE
+        prefer: AUTO                 # <3>
       shutdown:
-        graceful: true
-        quietPeriodMs: 200
-        timeoutMs: 3000
+        graceful: true               # <4>
+        quietPeriodMs: 200           # <5>
+        timeoutMs: 3000              # <6>
 ----
+<1> Number of boss threads (acceptors). Usually 1 is sufficient.
+<2> Number of worker threads. `0` means `CPU cores * 2`.
+<3> Transport type: `AUTO`, `NIO`, `EPOLL` (Linux), `KQUEUE` (macOS/BSD).
+<4> Enable graceful shutdown.
+<5> Quiet period before shutdown (milliseconds).
+<6> Maximum shutdown wait time (milliseconds).
+
+=== Thread Configuration
+
+[cols="3,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`defaults.threads.boss`
+|`1`
+|int
+|Number of boss (acceptor) threads. Boss threads accept incoming connections and hand them off to workers.
+
+|`defaults.threads.worker`
+|`0`
+|int
+|Number of worker (I/O) threads. `0` = auto-detect (CPU cores × 2). Workers handle read/write operations.
+|===
+
+=== Transport Configuration
+
+[cols="3,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`defaults.transport.prefer`
+|`AUTO`
+|enum
+|Preferred transport implementation.
+|===
+
+Transport options:
+
+* `AUTO` - Automatically select the best available (EPOLL on Linux, KQUEUE on macOS, NIO elsewhere)
+* `NIO` - Java NIO transport (works everywhere)
+* `EPOLL` - Linux-specific high-performance transport
+* `KQUEUE` - macOS/BSD-specific high-performance transport
+
+=== Shutdown Configuration
+
+[cols="3,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`defaults.shutdown.graceful`
+|`true`
+|boolean
+|Enable graceful shutdown. When true, server waits for in-flight requests to complete.
+
+|`defaults.shutdown.quietPeriodMs`
+|`200`
+|long
+|Quiet period in milliseconds. Server waits this long with no new requests before proceeding.
+
+|`defaults.shutdown.timeoutMs`
+|`3000`
+|long
+|Maximum time to wait for shutdown in milliseconds.
+|===
 
 == Server Configuration
+
+Each server is defined as an item in the `servers` list:
 
 [source,yaml]
 ----
 spring:
   netty:
     servers:
-      - name: tcp-server           # Required: unique server name
-        transport: TCP             # TCP/HTTP/UDP
-        host: 0.0.0.0              # Bind address
-        port: 9000                 # Bind port
-        profile: tcp-lengthfield-json  # Protocol profile
+      - name: my-server              # Required: unique identifier
+        transport: TCP               # Required: TCP, HTTP, or UDP
+        host: 0.0.0.0                # Bind address
+        port: 9000                   # Required: port number
+        profile: tcp-lengthfield-json  # Required: protocol profile
         routing:
-          mode: MESSAGE_TYPE       # MESSAGE_TYPE/PATH/WS_PATH
-        features:                  # Optional features
-          idle:
-            enabled: true
-            readSeconds: 60
-            writeSeconds: 30
-          logging:
-            enabled: true
-            level: DEBUG
+          mode: MESSAGE_TYPE         # Routing mode
+        features:                    # Optional features
           ssl:
             enabled: false
-            certPath: /path/to/cert.pem
-            keyPath: /path/to/key.pem
+          idle:
+            enabled: false
+          logging:
+            enabled: false
           rateLimit:
             enabled: false
-            requestsPerSecond: 100
-            burstSize: 150
           connectionLimit:
             enabled: false
-            maxConnections: 10000
 ----
 
+=== Basic Server Properties
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`name`
+|_(required)_
+|String
+|Unique identifier for this server. Used in logs and metrics.
+
+|`transport`
+|_(required)_
+|enum
+|Transport protocol: `TCP`, `HTTP`, or `UDP`.
+
+|`host`
+|`0.0.0.0`
+|String
+|Bind address. `0.0.0.0` binds to all network interfaces. `127.0.0.1` for localhost only.
+
+|`port`
+|_(required)_
+|int
+|Port number to listen on (1-65535).
+
+|`profile`
+|_(required)_
+|String
+|Protocol profile name. See xref:server/profiles.adoc[Profiles] for available options.
+|===
+
+=== Routing Configuration
+
+[cols="3,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`routing.mode`
+|`MESSAGE_TYPE`
+|enum
+|How to extract route key from messages.
+|===
+
+Routing modes:
+
+* `MESSAGE_TYPE` - Extract from JSON `type` field (for TCP/UDP)
+* `PATH` - Use HTTP request path (for HTTP)
+* `WS_PATH` - Use WebSocket path (for WebSocket)
+
+=== Feature Configuration
+
+Features add optional capabilities to the server pipeline. See xref:server/features.adoc[Features] for detailed documentation.
+
+==== SSL Feature
+
+[source,yaml]
+----
+features:
+  ssl:
+    enabled: true
+    certPath: /path/to/cert.pem      # X.509 certificate
+    keyPath: /path/to/key.pem        # Private key
+----
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`ssl.enabled`
+|`false`
+|boolean
+|Enable SSL/TLS encryption.
+
+|`ssl.certPath`
+|_(required if enabled)_
+|String
+|Path to X.509 certificate file (PEM format).
+
+|`ssl.keyPath`
+|_(required if enabled)_
+|String
+|Path to private key file (PEM format).
+|===
+
+==== Idle Detection Feature
+
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    readSeconds: 60                  # No read timeout
+    writeSeconds: 30                 # No write timeout
+    allSeconds: 0                    # No activity timeout (0 = disabled)
+----
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`idle.enabled`
+|`false`
+|boolean
+|Enable idle connection detection.
+
+|`idle.readSeconds`
+|`0`
+|int
+|Close connection after this many seconds without reads. `0` = disabled.
+
+|`idle.writeSeconds`
+|`0`
+|int
+|Close connection after this many seconds without writes. `0` = disabled.
+
+|`idle.allSeconds`
+|`0`
+|int
+|Close connection after this many seconds of inactivity. `0` = disabled.
+|===
+
+==== Logging Feature
+
+[source,yaml]
+----
+features:
+  logging:
+    enabled: true
+    level: DEBUG                     # Log level
+----
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`logging.enabled`
+|`false`
+|boolean
+|Enable traffic logging.
+
+|`logging.level`
+|`DEBUG`
+|String
+|Log level: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`.
+|===
+
+==== Rate Limiting Feature
+
+[source,yaml]
+----
+features:
+  rateLimit:
+    enabled: true
+    requestsPerSecond: 100           # Sustained rate
+    burstSize: 150                   # Burst capacity
+----
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`rateLimit.enabled`
+|`false`
+|boolean
+|Enable rate limiting (token bucket algorithm).
+
+|`rateLimit.requestsPerSecond`
+|`100`
+|int
+|Sustained requests per second allowed.
+
+|`rateLimit.burstSize`
+|`150`
+|int
+|Maximum burst size (bucket capacity).
+|===
+
+==== Connection Limit Feature
+
+[source,yaml]
+----
+features:
+  connectionLimit:
+    enabled: true
+    maxConnections: 10000            # Maximum concurrent connections
+----
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`connectionLimit.enabled`
+|`false`
+|boolean
+|Enable connection limiting.
+
+|`connectionLimit.maxConnections`
+|`10000`
+|int
+|Maximum number of concurrent connections.
+|===
+
 == Client Configuration
+
+Each client is defined as an item in the `clients` list:
 
 [source,yaml]
 ----
 spring:
   netty:
     clients:
-      - name: order-service        # Required: unique client name
-        host: 127.0.0.1            # Server host
-        port: 9000                 # Server port
-        profile: tcp-lengthfield-json  # Protocol profile
-        pool:
+      - name: order-service          # Required: unique identifier
+        host: 127.0.0.1              # Required: server host
+        port: 9000                   # Required: server port
+        profile: tcp-lengthfield-json  # Required: protocol profile
+        pool:                        # Connection pool settings
           maxConnections: 10
           minIdle: 2
           maxIdleMs: 60000
           acquireTimeoutMs: 5000
-        reconnect:
+        reconnect:                   # Reconnection settings
           enabled: true
           initialDelayMs: 1000
           maxDelayMs: 30000
           multiplier: 2.0
-          maxRetries: -1           # -1 = infinite
-        heartbeat:
+          maxRetries: -1
+        heartbeat:                   # Heartbeat settings
           enabled: true
           intervalMs: 30000
           timeoutMs: 5000
           message: '{"type":"heartbeat"}'
-        timeout:
+        timeout:                     # Timeout settings
           connectMs: 5000
           requestMs: 10000
 ----
+
+=== Basic Client Properties
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`name`
+|_(required)_
+|String
+|Unique identifier for this client. Must match `@NettyClient(name = "...")`.
+
+|`host`
+|_(required)_
+|String
+|Server hostname or IP address.
+
+|`port`
+|_(required)_
+|int
+|Server port number.
+
+|`profile`
+|_(required)_
+|String
+|Protocol profile name. Should match server's profile.
+|===
+
+=== Connection Pool Configuration
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`pool.maxConnections`
+|`10`
+|int
+|Maximum number of connections in the pool.
+
+|`pool.minIdle`
+|`2`
+|int
+|Minimum idle connections to maintain.
+
+|`pool.maxIdleMs`
+|`60000`
+|long
+|Maximum idle time before connection is closed (milliseconds).
+
+|`pool.acquireTimeoutMs`
+|`5000`
+|long
+|Timeout when waiting to acquire a connection (milliseconds).
+|===
+
+=== Reconnection Configuration
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`reconnect.enabled`
+|`true`
+|boolean
+|Enable automatic reconnection.
+
+|`reconnect.initialDelayMs`
+|`1000`
+|long
+|Initial delay before first reconnection attempt (milliseconds).
+
+|`reconnect.maxDelayMs`
+|`30000`
+|long
+|Maximum delay between reconnection attempts (milliseconds).
+
+|`reconnect.multiplier`
+|`2.0`
+|double
+|Exponential backoff multiplier.
+
+|`reconnect.maxRetries`
+|`-1`
+|int
+|Maximum reconnection attempts. `-1` = unlimited.
+|===
+
+=== Heartbeat Configuration
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`heartbeat.enabled`
+|`false`
+|boolean
+|Enable heartbeat for keep-alive.
+
+|`heartbeat.intervalMs`
+|`30000`
+|long
+|Interval between heartbeat messages (milliseconds).
+
+|`heartbeat.timeoutMs`
+|`5000`
+|long
+|Timeout waiting for heartbeat response (milliseconds).
+
+|`heartbeat.message`
+|`{"type":"heartbeat"}`
+|String
+|Heartbeat message content (JSON string).
+|===
+
+=== Timeout Configuration
+
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`timeout.connectMs`
+|`5000`
+|long
+|Connection establishment timeout (milliseconds).
+
+|`timeout.requestMs`
+|`10000`
+|long
+|Default request/response timeout (milliseconds). Can be overridden per-method with `@NettyRequest(timeout = ...)`.
+|===
 
 == Observability Configuration
 
@@ -114,11 +551,26 @@ spring:
 spring:
   netty:
     observability:
-      metrics: true                # Enable Micrometer metrics
-      health: true                 # Enable health check endpoint
+      metrics: true                  # Enable Micrometer metrics
+      health: true                   # Enable health check
 ----
 
-== Full Example
+[cols="2,1,1,4"]
+|===
+|Property |Default |Type |Description
+
+|`observability.metrics`
+|`true`
+|boolean
+|Enable Micrometer metrics integration.
+
+|`observability.health`
+|`true`
+|boolean
+|Enable health check indicator.
+|===
+
+== Complete Example
 
 [source,yaml]
 ----
@@ -138,6 +590,7 @@ spring:
         timeoutMs: 3000
 
     servers:
+      # TCP server with JSON codec
       - name: tcp-server
         transport: TCP
         host: 0.0.0.0
@@ -149,35 +602,74 @@ spring:
           idle:
             enabled: true
             readSeconds: 60
+          logging:
+            enabled: true
+            level: DEBUG
+          connectionLimit:
+            enabled: true
+            maxConnections: 10000
 
+      # HTTP REST API server
       - name: http-server
         transport: HTTP
         port: 8080
         profile: http1-json
         routing:
           mode: PATH
+        features:
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 1000
+            burstSize: 1500
 
+      # WebSocket server
       - name: ws-server
         transport: HTTP
         port: 8081
         profile: websocket
         routing:
           mode: WS_PATH
+        features:
+          idle:
+            enabled: true
+            allSeconds: 300
 
     clients:
       - name: order-service
-        host: 127.0.0.1
+        host: order.internal
         port: 9000
         profile: tcp-lengthfield-json
         pool:
-          maxConnections: 10
+          maxConnections: 20
+          minIdle: 5
         reconnect:
           enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 30000
         heartbeat:
           enabled: true
           intervalMs: 30000
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
+
+      - name: notification-service
+        host: notify.internal
+        port: 9001
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 5
+        timeout:
+          requestMs: 30000
 
     observability:
       metrics: true
       health: true
+
+# Actuator endpoint exposure
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,netty,prometheus
 ----

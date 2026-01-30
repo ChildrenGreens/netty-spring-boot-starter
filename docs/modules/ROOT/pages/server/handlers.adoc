@@ -1,103 +1,119 @@
 = Handlers
 :page-pagination:
 
-This page documents the different handler types available for processing network messages.
+Handlers are the core of your application logic. This page covers all handler types, annotations, and parameter binding options.
 
-== Handler Annotations
+== Handler Types Overview
 
-[cols="2,3"]
+[cols="2,2,3"]
 |===
-|Annotation |Description
+|Controller Type |Annotation |Use Case
 
-|`@NettyController`
-|HTTP/WebSocket controller
-
+|TCP/UDP Message Handler
 |`@NettyMessageController`
-|TCP/UDP message controller
+|Process messages routed by type field
 
-|`@NettyMessageMapping`
-|Message type mapping
+|HTTP Controller
+|`@NettyController`
+|REST API endpoints
 
-|`@NettyHttpGet/Post/Put/Delete`
-|HTTP method mapping
-
-|`@NettyWsOnOpen/Text/Binary/Close`
-|WebSocket event mapping
+|WebSocket Handler
+|`@NettyController`
+|WebSocket events (connect, message, close)
 |===
 
-== Parameter Annotations
+== TCP/UDP Message Handlers
 
-[cols="2,3"]
-|===
-|Annotation |Description
+=== Basic Usage
 
-|`@PathVar`
-|Extract path variable from URL
-
-|`@Query`
-|Extract query parameter
-
-|`@Body`
-|Extract request body
-
-|`@Header`
-|Extract HTTP header
-|===
-
-== TCP/UDP Message Handler
-
-Use `@NettyMessageController` for handling TCP/UDP messages:
+Use `@NettyMessageController` to create a handler for TCP or UDP messages:
 
 [source,java]
 ----
-@NettyMessageController
-public class MessageHandler {
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageController;
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageMapping;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 
-    @NettyMessageMapping("ping")
-    public Map<String, Object> handlePing(NettyContext context) {
-        return Map.of(
-            "type", "pong",
-            "timestamp", System.currentTimeMillis(),
-            "channelId", context.getChannelId()
-        );
+@NettyMessageController
+public class GameMessageHandler {
+
+    @NettyMessageMapping("player.move")
+    public MoveResponse handleMove(MoveRequest request, NettyContext context) {
+        // Process player movement
+        return new MoveResponse(request.getPlayerId(), newPosition);
     }
 
-    @NettyMessageMapping("order")
-    public CompletableFuture<OrderResponse> handleOrder(
-            OrderRequest request, NettyContext context) {
-        // Async processing supported
-        return orderService.processAsync(request);
+    @NettyMessageMapping("player.attack")
+    public AttackResponse handleAttack(AttackRequest request) {
+        // Process attack action
+        return attackService.processAttack(request);
     }
 }
 ----
 
-== HTTP Controller
+=== Message Format
+
+Messages are JSON objects with a `type` field used for routing:
+
+[source,json]
+----
+{
+    "type": "player.move",
+    "playerId": 12345,
+    "x": 100,
+    "y": 200
+}
+----
+
+The `type` field value (`player.move`) must match the `@NettyMessageMapping` value exactly.
+
+=== Supported Route Key Fields
+
+The framework looks for route key in these JSON fields (in order):
+
+1. `type`
+2. `cmd`
+3. `action`
+4. `command`
+
+[source,json]
+----
+{"type": "ping"}        // Matches @NettyMessageMapping("ping")
+{"cmd": "login"}        // Matches @NettyMessageMapping("login")
+{"action": "refresh"}   // Matches @NettyMessageMapping("refresh")
+----
+
+== HTTP Controllers
+
+=== Basic HTTP Endpoints
 
 Use `@NettyController` with HTTP method annotations:
 
 [source,java]
 ----
-@NettyController(path = "/api")
-public class HttpController {
+import com.childrengreens.netty.spring.boot.context.annotation.*;
 
-    @NettyHttpGet("/health")
-    public Map<String, Object> health() {
-        return Map.of("status", "UP");
+@NettyController(path = "/api/v1")
+public class UserController {
+
+    @NettyHttpGet("/users")
+    public List<User> listUsers() {
+        return userService.findAll();
     }
 
     @NettyHttpGet("/users/{id}")
-    public User getUser(@PathVar("id") Long id, @Query("fields") String fields) {
+    public User getUser(@PathVar("id") Long id) {
         return userService.findById(id);
     }
 
     @NettyHttpPost("/users")
-    public User createUser(@Body User user) {
-        return userService.save(user);
+    public User createUser(@Body UserCreateRequest request) {
+        return userService.create(request);
     }
 
     @NettyHttpPut("/users/{id}")
-    public User updateUser(@PathVar("id") Long id, @Body User user) {
-        return userService.update(id, user);
+    public User updateUser(@PathVar("id") Long id, @Body UserUpdateRequest request) {
+        return userService.update(id, request);
     }
 
     @NettyHttpDelete("/users/{id}")
@@ -107,80 +123,450 @@ public class HttpController {
 }
 ----
 
-== WebSocket Handler
+=== HTTP Method Annotations
 
-Use `@NettyController` with WebSocket event annotations:
+[cols="2,2,3"]
+|===
+|Annotation |HTTP Method |Example
+
+|`@NettyHttpGet`
+|GET
+|`@NettyHttpGet("/users/{id}")`
+
+|`@NettyHttpPost`
+|POST
+|`@NettyHttpPost("/users")`
+
+|`@NettyHttpPut`
+|PUT
+|`@NettyHttpPut("/users/{id}")`
+
+|`@NettyHttpDelete`
+|DELETE
+|`@NettyHttpDelete("/users/{id}")`
+
+|`@NettyHttpPatch`
+|PATCH
+|`@NettyHttpPatch("/users/{id}")`
+|===
+
+=== Path Variables
+
+Extract values from URL path:
 
 [source,java]
 ----
+@NettyHttpGet("/orders/{orderId}/items/{itemId}")
+public OrderItem getOrderItem(
+        @PathVar("orderId") Long orderId,
+        @PathVar("itemId") Long itemId) {
+    return orderService.getItem(orderId, itemId);
+}
+----
+
+URL: `GET /orders/123/items/456` → `orderId=123`, `itemId=456`
+
+=== Query Parameters
+
+Extract URL query parameters:
+
+[source,java]
+----
+@NettyHttpGet("/users")
+public Page<User> searchUsers(
+        @Query("name") String name,
+        @Query("page") Integer page,
+        @Query("size") Integer size) {
+    return userService.search(name, page, size);
+}
+----
+
+URL: `GET /users?name=John&page=0&size=10`
+
+=== Request Headers
+
+Extract HTTP headers:
+
+[source,java]
+----
+@NettyHttpGet("/protected/resource")
+public Resource getResource(
+        @Header("Authorization") String authToken,
+        @Header("X-Request-ID") String requestId) {
+    // Validate token and process request
+    return resourceService.get(authToken);
+}
+----
+
+=== Request Body
+
+Parse JSON request body:
+
+[source,java]
+----
+@NettyHttpPost("/orders")
+public Order createOrder(@Body OrderRequest request) {
+    return orderService.create(request);
+}
+----
+
+Request:
+[source,bash]
+----
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"productId": 123, "quantity": 2}' \
+     http://localhost:8080/orders
+----
+
+== WebSocket Handlers
+
+=== WebSocket Event Annotations
+
+[cols="2,3"]
+|===
+|Annotation |Description
+
+|`@NettyWsOnOpen`
+|Called when WebSocket connection is established
+
+|`@NettyWsOnText`
+|Called when text message is received
+
+|`@NettyWsOnBinary`
+|Called when binary message is received
+
+|`@NettyWsOnClose`
+|Called when WebSocket connection is closed
+
+|`@NettyWsOnError`
+|Called when an error occurs
+|===
+
+=== Complete WebSocket Example
+
+[source,java]
+----
+import com.childrengreens.netty.spring.boot.context.annotation.*;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+
 @NettyController(path = "/ws")
-public class WebSocketHandler {
+public class ChatWebSocketHandler {
 
-    @NettyWsOnOpen("/chat")
-    public void onOpen(NettyContext context) {
-        log.info("WebSocket connected: {}", context.getChannelId());
+    private final ChatService chatService;
+    private final Map<String, NettyContext> connections = new ConcurrentHashMap<>();
+
+    @NettyWsOnOpen("/chat/{roomId}")
+    public void onConnect(
+            @PathVar("roomId") String roomId,
+            @Query("username") String username,
+            NettyContext context) {
+        // Store connection
+        connections.put(context.getChannelId(), context);
+        chatService.joinRoom(roomId, username, context);
+
+        // Send welcome message
+        context.writeAndFlush(Map.of(
+            "type", "system",
+            "message", "Welcome to room " + roomId
+        ));
     }
 
-    @NettyWsOnText("/chat")
-    public String onMessage(String message, NettyContext context) {
-        return "Echo: " + message;
+    @NettyWsOnText("/chat/{roomId}")
+    public void onMessage(
+            String message,
+            @PathVar("roomId") String roomId,
+            NettyContext context) {
+        // Broadcast message to room
+        ChatMessage chatMessage = parseMessage(message);
+        chatService.broadcast(roomId, chatMessage);
     }
 
-    @NettyWsOnBinary("/chat")
-    public byte[] onBinary(byte[] data, NettyContext context) {
-        return data; // Echo binary
+    @NettyWsOnBinary("/chat/{roomId}")
+    public byte[] onBinaryMessage(byte[] data, NettyContext context) {
+        // Handle file upload or binary data
+        return processAndAcknowledge(data);
     }
 
-    @NettyWsOnClose("/chat")
-    public void onClose(NettyContext context) {
-        log.info("WebSocket disconnected: {}", context.getChannelId());
+    @NettyWsOnClose("/chat/{roomId}")
+    public void onDisconnect(
+            @PathVar("roomId") String roomId,
+            NettyContext context) {
+        connections.remove(context.getChannelId());
+        chatService.leaveRoom(roomId, context);
     }
+
+    @NettyWsOnError("/chat/{roomId}")
+    public void onError(Throwable error, NettyContext context) {
+        log.error("WebSocket error for channel {}", context.getChannelId(), error);
+    }
+}
+----
+
+=== WebSocket Client Connection
+
+[source,javascript]
+----
+// JavaScript client
+const ws = new WebSocket('ws://localhost:8081/ws/chat/room1?username=John');
+
+ws.onopen = () => {
+    console.log('Connected');
+    ws.send(JSON.stringify({ text: 'Hello!' }));
+};
+
+ws.onmessage = (event) => {
+    console.log('Received:', event.data);
+};
+
+ws.onclose = () => {
+    console.log('Disconnected');
+};
+----
+
+== Parameter Annotations Reference
+
+[cols="2,1,4"]
+|===
+|Annotation |Required |Description
+
+|`@PathVar("name")`
+|No
+|Extracts path variable from URL. Type conversion is automatic.
+
+|`@Query("name")`
+|No
+|Extracts query parameter. Returns `null` if not present.
+
+|`@Header("name")`
+|No
+|Extracts HTTP header value.
+
+|`@Body`
+|No
+|Deserializes request body from JSON.
+
+|`@Param("name")`
+|No
+|Extracts named parameter from message payload (for TCP/UDP).
+|===
+
+== Supported Parameter Types
+
+Handler methods can accept these parameter types without annotations:
+
+[cols="2,4"]
+|===
+|Type |Description
+
+|`NettyContext`
+|Access to channel, write methods, channel attributes
+
+|`Channel`
+|Netty channel directly
+
+|`InboundMessage`
+|Raw inbound message with headers and payload
+
+|`Map<String, Object>`
+|Deserialized JSON payload as Map
+|===
+
+Example:
+
+[source,java]
+----
+@NettyMessageMapping("example")
+public Response handle(
+        NettyContext context,          // Injected automatically
+        Channel channel,               // Injected automatically
+        InboundMessage message,        // Injected automatically
+        Map<String, Object> payload) { // Deserialized from JSON
+    // All parameters available
 }
 ----
 
 == Return Types
 
-Handlers support multiple return types:
-
-[cols="2,3"]
-|===
-|Return Type |Description
-
-|`void`
-|No response
-
-|`Object`
-|Sync response, serialized by codec
-
-|`CompletableFuture<T>`
-|Async response
-
-|`OutboundMessage`
-|Full control over response
-|===
-
-== NettyContext
-
-The `NettyContext` provides access to the underlying Netty channel:
+=== Synchronous Return
 
 [source,java]
 ----
-@NettyMessageMapping("example")
-public void handle(NettyContext context) {
-    // Get channel ID
-    String channelId = context.getChannelId();
+@NettyMessageMapping("sync")
+public Response handleSync(Request request) {
+    return processRequest(request);  // Blocks until complete
+}
+----
 
-    // Get underlying Netty channel
+=== Asynchronous Return
+
+[source,java]
+----
+@NettyMessageMapping("async")
+public CompletableFuture<Response> handleAsync(Request request) {
+    return CompletableFuture.supplyAsync(() -> {
+        // Process in background thread
+        return processRequest(request);
+    });
+}
+----
+
+=== Void Return (No Response)
+
+[source,java]
+----
+@NettyMessageMapping("fire-and-forget")
+public void handleNoResponse(Request request) {
+    // Process but don't send response
+    eventBus.publish(request);
+}
+----
+
+=== OutboundMessage Return (Full Control)
+
+[source,java]
+----
+@NettyMessageMapping("custom")
+public OutboundMessage handleCustom(Request request) {
+    if (request.isInvalid()) {
+        return OutboundMessage.error(400, "Invalid request");
+    }
+    return OutboundMessage.ok(processRequest(request));
+}
+----
+
+== NettyContext API
+
+The `NettyContext` provides access to the underlying channel and utilities:
+
+[source,java]
+----
+@NettyMessageMapping("context-demo")
+public void demonstrateContext(NettyContext context) {
+    // Get channel info
+    String channelId = context.getChannelId();
+    String serverName = context.getServerName();
     Channel channel = context.getChannel();
 
-    // Get server name
-    String serverName = context.getServerName();
+    // Check connection state
+    boolean isActive = context.isActive();
 
-    // Write message directly
-    context.write(message);
-    context.writeAndFlush(message);
+    // Write directly to channel
+    context.write(response);
+    context.writeAndFlush(response);
 
     // Close connection
     context.close();
+
+    // Access channel attributes
+    context.getChannel().attr(MY_KEY).set(value);
 }
+----
+
+== Error Handling
+
+=== Handler Exception
+
+If a handler throws an exception, the framework:
+
+1. Logs the error
+2. Returns an error response (HTTP 500 or error message)
+3. Keeps the connection open (unless fatal)
+
+[source,java]
+----
+@NettyMessageMapping("risky")
+public Response handleRisky(Request request) {
+    if (request.isInvalid()) {
+        throw new IllegalArgumentException("Invalid request");
+    }
+    return process(request);
+}
+// Client receives: {"code": 500, "message": "Invalid request"}
+----
+
+=== Custom Error Response
+
+[source,java]
+----
+@NettyMessageMapping("validated")
+public OutboundMessage handleValidated(Request request) {
+    List<String> errors = validate(request);
+    if (!errors.isEmpty()) {
+        return OutboundMessage.error(400, "Validation failed: " + errors);
+    }
+    return OutboundMessage.ok(process(request));
+}
+----
+
+== Best Practices
+
+=== 1. Keep Handlers Lightweight
+
+Delegate business logic to services:
+
+[source,java]
+----
+// Good
+@NettyMessageMapping("order")
+public OrderResponse handleOrder(OrderRequest request) {
+    return orderService.processOrder(request);
+}
+
+// Avoid
+@NettyMessageMapping("order")
+public OrderResponse handleOrder(OrderRequest request) {
+    // Don't put business logic here
+    validateOrder(request);
+    Order order = createOrder(request);
+    saveOrder(order);
+    sendNotification(order);
+    return new OrderResponse(order);
+}
+----
+
+=== 2. Use Async for Slow Operations
+
+[source,java]
+----
+@NettyMessageMapping("slow-operation")
+public CompletableFuture<Response> handleSlow(Request request) {
+    return CompletableFuture.supplyAsync(() -> {
+        // Database query, external API call, etc.
+        return slowService.process(request);
+    }, asyncExecutor);
+}
+----
+
+=== 3. Handle Errors Gracefully
+
+[source,java]
+----
+@NettyMessageMapping("robust")
+public OutboundMessage handleRobust(Request request) {
+    try {
+        return OutboundMessage.ok(service.process(request));
+    } catch (NotFoundException e) {
+        return OutboundMessage.error(404, e.getMessage());
+    } catch (ValidationException e) {
+        return OutboundMessage.error(400, e.getMessage());
+    } catch (Exception e) {
+        log.error("Unexpected error", e);
+        return OutboundMessage.error(500, "Internal server error");
+    }
+}
+----
+
+=== 4. Use Meaningful Route Keys
+
+[source,java]
+----
+// Good - hierarchical naming
+@NettyMessageMapping("user.create")
+@NettyMessageMapping("user.update")
+@NettyMessageMapping("order.submit")
+@NettyMessageMapping("order.cancel")
+
+// Avoid - flat naming
+@NettyMessageMapping("createUser")
+@NettyMessageMapping("submitOrder")
 ----
