@@ -49,6 +49,7 @@ public class ConnectionPool {
     private final BlockingQueue<Channel> idleChannels;
     private final Set<Channel> borrowedChannels = ConcurrentHashMap.newKeySet();
     private final AtomicInteger totalConnections = new AtomicInteger(0);
+    private final AtomicInteger pendingAcquires = new AtomicInteger(0);
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final ScheduledExecutorService scheduler;
 
@@ -91,6 +92,18 @@ public class ConnectionPool {
             throw new IllegalStateException("Connection pool is closed");
         }
 
+        pendingAcquires.incrementAndGet();
+        try {
+            return doAcquire();
+        } finally {
+            pendingAcquires.decrementAndGet();
+        }
+    }
+
+    /**
+     * Internal acquire implementation.
+     */
+    private Channel doAcquire() throws Exception {
         PoolSpec poolSpec = clientSpec.getPool();
 
         // Try to get an idle channel
@@ -323,6 +336,15 @@ public class ConnectionPool {
      */
     public int getBorrowedConnections() {
         return borrowedChannels.size();
+    }
+
+    /**
+     * Return the number of pending acquire requests.
+     * @return the number of requests waiting for a connection
+     * @since 0.0.2
+     */
+    public int getPendingAcquires() {
+        return pendingAcquires.get();
     }
 
     /**

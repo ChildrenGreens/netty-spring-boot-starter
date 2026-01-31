@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.client;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ClientMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.EventLoopGroup;
@@ -38,6 +39,7 @@ public class ClientRuntime {
     private final ReconnectManager reconnectManager;
     private final HeartbeatManager heartbeatManager;
     private final RequestInvoker requestInvoker;
+    private final ClientMetrics metrics;
 
     private volatile ClientState state = ClientState.CREATED;
 
@@ -65,6 +67,26 @@ public class ClientRuntime {
     public ClientRuntime(ClientSpec clientSpec, Bootstrap bootstrap, EventLoopGroup workerGroup,
                          ConnectionPool connectionPool, ReconnectManager reconnectManager,
                          HeartbeatManager heartbeatManager, RequestInvoker requestInvoker) {
+        this(clientSpec, bootstrap, workerGroup, connectionPool, reconnectManager,
+                heartbeatManager, requestInvoker, new ClientMetrics(clientSpec.getName()));
+    }
+
+    /**
+     * Create a new ClientRuntime with metrics.
+     * @param clientSpec the client specification
+     * @param bootstrap the bootstrap
+     * @param workerGroup the worker event loop group
+     * @param connectionPool the connection pool
+     * @param reconnectManager the reconnect manager
+     * @param heartbeatManager the heartbeat manager
+     * @param requestInvoker the request invoker
+     * @param metrics the client metrics
+     * @since 0.0.2
+     */
+    public ClientRuntime(ClientSpec clientSpec, Bootstrap bootstrap, EventLoopGroup workerGroup,
+                         ConnectionPool connectionPool, ReconnectManager reconnectManager,
+                         HeartbeatManager heartbeatManager, RequestInvoker requestInvoker,
+                         ClientMetrics metrics) {
         this.clientSpec = clientSpec;
         this.bootstrap = bootstrap;
         this.workerGroup = workerGroup;
@@ -72,6 +94,7 @@ public class ClientRuntime {
         this.reconnectManager = reconnectManager;
         this.heartbeatManager = heartbeatManager;
         this.requestInvoker = requestInvoker;
+        this.metrics = metrics;
     }
 
     /**
@@ -128,6 +151,15 @@ public class ClientRuntime {
      */
     public RequestInvoker getRequestInvoker() {
         return this.requestInvoker;
+    }
+
+    /**
+     * Return the client metrics.
+     * @return the metrics
+     * @since 0.0.2
+     */
+    public ClientMetrics getMetrics() {
+        return this.metrics;
     }
 
     /**

@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.context;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import io.netty.channel.Channel;
 import io.netty.util.AttributeKey;
 
@@ -76,6 +77,12 @@ public class NettyContext {
      * Attribute key for storing trace ID.
      */
     public static final AttributeKey<String> TRACE_ID_KEY = AttributeKey.valueOf("netty.trace.id");
+
+    /**
+     * Attribute key for storing server metrics in the channel.
+     * @since 0.0.2
+     */
+    public static final AttributeKey<ServerMetrics> SERVER_METRICS_KEY = AttributeKey.valueOf("netty.server.metrics");
 
     private final Channel channel;
 

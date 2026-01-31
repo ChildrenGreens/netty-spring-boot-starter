@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.server;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ShutdownSpec;
 import io.netty.channel.Channel;
@@ -41,6 +42,7 @@ public class ServerRuntime {
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
     private final Channel bindChannel;
+    private final ServerMetrics metrics;
     private volatile ServerState state;
 
     /**
@@ -53,11 +55,28 @@ public class ServerRuntime {
      */
     public ServerRuntime(ServerSpec spec, EventLoopGroup bossGroup,
                          EventLoopGroup workerGroup, Channel bindChannel, ServerState state) {
+        this(spec, bossGroup, workerGroup, bindChannel, state, new ServerMetrics(spec.getName()));
+    }
+
+    /**
+     * Create a new ServerRuntime with metrics.
+     * @param spec the server specification
+     * @param bossGroup the boss event loop group
+     * @param workerGroup the worker event loop group
+     * @param bindChannel the bound server channel
+     * @param state the initial state
+     * @param metrics the server metrics
+     * @since 0.0.2
+     */
+    public ServerRuntime(ServerSpec spec, EventLoopGroup bossGroup,
+                         EventLoopGroup workerGroup, Channel bindChannel, ServerState state,
+                         ServerMetrics metrics) {
         this.spec = spec;
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
         this.bindChannel = bindChannel;
         this.state = state;
+        this.metrics = metrics;
     }
 
     /**
@@ -90,6 +109,15 @@ public class ServerRuntime {
      */
     public Channel getBindChannel() {
         return this.bindChannel;
+    }
+
+    /**
+     * Return the server metrics.
+     * @return the metrics
+     * @since 0.0.2
+     */
+    public ServerMetrics getMetrics() {
+        return this.metrics;
     }
 
     /**

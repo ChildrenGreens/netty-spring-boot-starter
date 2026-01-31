@@ -23,6 +23,7 @@ import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -68,6 +69,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     private final ServerSpec serverSpec;
     private final CodecRegistry codecRegistry;
     private final ObjectMapper objectMapper;
+    private final ServerMetrics serverMetrics;
 
     /**
      * Create a new DispatcherHandler.
@@ -76,10 +78,24 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
      * @param codecRegistry the codec registry for encoding responses
      */
     public DispatcherHandler(Dispatcher dispatcher, ServerSpec serverSpec, CodecRegistry codecRegistry) {
+        this(dispatcher, serverSpec, codecRegistry, null);
+    }
+
+    /**
+     * Create a new DispatcherHandler with metrics.
+     * @param dispatcher the message dispatcher
+     * @param serverSpec the server specification
+     * @param codecRegistry the codec registry for encoding responses
+     * @param serverMetrics the server metrics for recording request stats (may be null)
+     * @since 0.0.2
+     */
+    public DispatcherHandler(Dispatcher dispatcher, ServerSpec serverSpec, CodecRegistry codecRegistry,
+                             ServerMetrics serverMetrics) {
         this.dispatcher = dispatcher;
         this.serverSpec = serverSpec;
         this.codecRegistry = codecRegistry;
         this.objectMapper = resolveObjectMapper(codecRegistry);
+        this.serverMetrics = serverMetrics;
     }
 
     /**
@@ -105,6 +121,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Object msg) {
+        long startTime = System.nanoTime();
         NettyContext context = new NettyContext(ctx.channel());
         InboundMessage inbound;
 
@@ -126,7 +143,21 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
                     writeErrorResponse(ctx, msg, ex);
                     return null;
                 })
-                .whenComplete((outbound, ex) -> inbound.releaseRawPayloadBuffer());
+                .whenComplete((outbound, ex) -> {
+                    inbound.releaseRawPayloadBuffer();
+                    recordRequestMetrics(startTime);
+                });
+    }
+
+    /**
+     * Record request metrics if metrics are available.
+     * @param startTimeNanos the request start time in nanoseconds
+     */
+    private void recordRequestMetrics(long startTimeNanos) {
+        if (serverMetrics != null) {
+            long latencyNanos = System.nanoTime() - startTimeNanos;
+            serverMetrics.recordRequest(latencyNanos);
+        }
     }
 
     /**

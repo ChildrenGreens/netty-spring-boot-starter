@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.client;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ClientMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ReconnectSpec;
 import io.netty.bootstrap.Bootstrap;
@@ -58,6 +59,7 @@ public class ReconnectManager {
 
     private ScheduledFuture<?> reconnectFuture;
     private ReconnectListener listener;
+    private ClientMetrics clientMetrics;
 
     /**
      * Listener for reconnection events.
@@ -103,6 +105,15 @@ public class ReconnectManager {
      */
     public void setListener(ReconnectListener listener) {
         this.listener = listener;
+    }
+
+    /**
+     * Set the client metrics for tracking reconnection attempts.
+     * @param clientMetrics the client metrics
+     * @since 0.0.2
+     */
+    public void setClientMetrics(ClientMetrics clientMetrics) {
+        this.clientMetrics = clientMetrics;
     }
 
     /**
@@ -153,6 +164,11 @@ public class ReconnectManager {
 
         logger.info("Attempting reconnection for client [{}] (attempt {}/{})",
                 clientSpec.getName(), currentRetry, maxRetries < 0 ? "∞" : maxRetries);
+
+        // Record reconnection attempt in metrics
+        if (clientMetrics != null) {
+            clientMetrics.incrementReconnectCount();
+        }
 
         ChannelFuture future = null;
         try {

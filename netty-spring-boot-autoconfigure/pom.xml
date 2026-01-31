@@ -24,6 +24,20 @@
             <artifactId>netty-spring-boot-context</artifactId>
         </dependency>
 
+        <!-- Actuator module (optional) -->
+        <dependency>
+            <groupId>com.childrengreens</groupId>
+            <artifactId>netty-spring-boot-actuator</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Micrometer (optional, for metrics auto-configuration) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Spring Boot AutoConfigure -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

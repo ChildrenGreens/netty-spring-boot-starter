@@ -213,9 +213,14 @@ public class NettyClientOrchestrator implements InitializingBean, DisposableBean
         // Create heartbeat manager
         HeartbeatManager heartbeatManager = new HeartbeatManager(spec, connectionPool, requestInvoker, scheduledExecutor);
 
-        // Create runtime
+        // Create runtime with metrics
         ClientRuntime runtime = new ClientRuntime(spec, bootstrap, workerGroup,
                 connectionPool, reconnectManager, heartbeatManager, requestInvoker);
+
+        // Set metrics to components that need to record them
+        requestInvoker.setClientMetrics(runtime.getMetrics());
+        reconnectManager.setClientMetrics(runtime.getMetrics());
+
         runtime.setState(ClientRuntime.ClientState.RUNNING);
 
         // Start heartbeat if enabled

@@ -17,6 +17,7 @@
 package com.childrengreens.netty.spring.boot.context.client;
 
 import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
+import com.childrengreens.netty.spring.boot.context.metrics.ClientMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import io.netty.channel.Channel;
 import org.slf4j.Logger;
@@ -57,6 +58,8 @@ public class RequestInvoker {
     private final ConcurrentMap<String, ResponseFuture<Object>> pendingRequests = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timeoutScheduler;
 
+    private ClientMetrics clientMetrics;
+
     /**
      * Create a new RequestInvoker.
      * @param clientSpec the client specification
@@ -76,6 +79,15 @@ public class RequestInvoker {
     }
 
     /**
+     * Set the client metrics for tracking request stats.
+     * @param clientMetrics the client metrics
+     * @since 0.0.2
+     */
+    public void setClientMetrics(ClientMetrics clientMetrics) {
+        this.clientMetrics = clientMetrics;
+    }
+
+    /**
      * Invoke a request asynchronously.
      * @param channel the channel to use
      * @param messageType the message type
@@ -84,6 +96,7 @@ public class RequestInvoker {
      * @return a CompletableFuture for the response
      */
     public CompletableFuture<Object> invoke(Channel channel, String messageType, Object payload, long timeoutMs) {
+        long startTime = System.nanoTime();
         String correlationId = generateCorrelationId();
         long actualTimeout = timeoutMs > 0 ? timeoutMs : clientSpec.getTimeout().getRequestMs();
 
@@ -109,7 +122,13 @@ public class RequestInvoker {
             pendingRequests.remove(correlationId);
         }
 
-        return responseFuture.toCompletableFuture();
+        // Record metrics when request completes
+        return responseFuture.toCompletableFuture().whenComplete((result, ex) -> {
+            if (clientMetrics != null) {
+                long latencyNanos = System.nanoTime() - startTime;
+                clientMetrics.recordRequest(latencyNanos);
+            }
+        });
     }
 
     /**
@@ -123,6 +142,10 @@ public class RequestInvoker {
             Map<String, Object> request = buildRequest(messageType, null, payload);
             channel.writeAndFlush(request);
             logger.debug("One-way request sent: type={}", messageType);
+            // Record request (no latency for one-way)
+            if (clientMetrics != null) {
+                clientMetrics.incrementRequests();
+            }
         } catch (Exception e) {
             logger.error("Failed to send one-way request: type={}", messageType, e);
         }
