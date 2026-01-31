@@ -1,129 +1,675 @@
-= 配置
+= 配置参考
 :page-pagination:
 
-本页面介绍 Netty Spring Boot Starter 的所有配置选项。
+本页面介绍 Netty Spring Boot Starter 的所有可用配置属性。
 
-== 配置前缀
+== 配置结构
 
-所有配置使用 `spring.netty` 前缀。
-
-== 全局配置
+所有配置都在 `spring.netty` 前缀下：
 
 [source,yaml]
 ----
 spring:
   netty:
-    enabled: true                    # 启用/禁用 Netty
-    defaults:
-      threads:
-        boss: 1                      # Boss 线程数
-        worker: 0                    # Worker 线程数 (0=CPU核心数)
+    enabled: true                    # 主开关
+    server:
+      enabled: true                  # 服务端组件开关
+    client:
+      enabled: true                  # 客户端组件开关
+    defaults:                        # 所有服务器的默认设置
+      ...
+    servers:                         # 服务器定义
+      - name: server1
+        ...
+    clients:                         # 客户端定义
+      - name: client1
+        ...
+    observability:                   # 指标和健康检查
+      ...
 ----
 
-== 服务端配置
+== 启用/禁用组件
+
+控制哪些组件处于活动状态：
+
+[cols="3,1,4"]
+|===
+|属性 |默认值 |描述
+
+|`spring.netty.enabled`
+|`true`
+|所有 Netty 功能的主开关。设为 `false` 时，不会创建任何 Netty Bean。
+
+|`spring.netty.server.enabled`
+|`true`
+|启用/禁用服务端组件。对于仅客户端的应用，设为 `false`。
+
+|`spring.netty.client.enabled`
+|`true`
+|启用/禁用客户端组件。对于仅服务端的应用，设为 `false`。
+|===
+
+.仅客户端应用示例
+[source,yaml]
+----
+spring:
+  netty:
+    server:
+      enabled: false    # 禁用服务端
+    client:
+      enabled: true     # 启用客户端（默认）
+    clients:
+      - name: my-service
+        host: remote-server.example.com
+        port: 9000
+----
+
+== 默认设置
+
+默认设置适用于所有服务器，除非被覆盖：
+
+[source,yaml]
+----
+spring:
+  netty:
+    defaults:
+      threads:
+        boss: 1                      # <1>
+        worker: 0                    # <2>
+      transport:
+        prefer: AUTO                 # <3>
+      shutdown:
+        graceful: true               # <4>
+        quietPeriodMs: 200           # <5>
+        timeoutMs: 3000              # <6>
+----
+<1> Boss 线程数（接收器）。通常 1 就足够了。
+<2> Worker 线程数。`0` 表示 `CPU 核心数 * 2`。
+<3> 传输类型：`AUTO`、`NIO`、`EPOLL`（Linux）、`KQUEUE`（macOS/BSD）。
+<4> 启用优雅关闭。
+<5> 关闭前的静默期（毫秒）。
+<6> 最大关闭等待时间（毫秒）。
+
+=== 线程配置
+
+[cols="3,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`defaults.threads.boss`
+|`1`
+|int
+|Boss（接收器）线程数。Boss 线程接受传入连接并将其交给 Worker。
+
+|`defaults.threads.worker`
+|`0`
+|int
+|Worker（I/O）线程数。`0` = 自动检测（CPU 核心数 × 2）。Worker 处理读/写操作。
+|===
+
+=== 传输配置
+
+[cols="3,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`defaults.transport.prefer`
+|`AUTO`
+|enum
+|首选的传输实现。
+|===
+
+传输选项：
+
+* `AUTO` - 自动选择最佳可用（Linux 上为 EPOLL，macOS 上为 KQUEUE，其他为 NIO）
+* `NIO` - Java NIO 传输（到处可用）
+* `EPOLL` - Linux 特定的高性能传输
+* `KQUEUE` - macOS/BSD 特定的高性能传输
+
+=== 关闭配置
+
+[cols="3,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`defaults.shutdown.graceful`
+|`true`
+|boolean
+|启用优雅关闭。设为 true 时，服务器等待正在处理的请求完成。
+
+|`defaults.shutdown.quietPeriodMs`
+|`200`
+|long
+|静默期（毫秒）。服务器在没有新请求时等待这么长时间后再继续。
+
+|`defaults.shutdown.timeoutMs`
+|`3000`
+|long
+|等待关闭的最大时间（毫秒）。
+|===
+
+== 服务器配置
+
+每个服务器定义为 `servers` 列表中的一项：
 
 [source,yaml]
 ----
 spring:
   netty:
     servers:
-      - name: my-server              # 服务器名称
-        transport: TCP               # 传输类型: TCP, HTTP, UDP
-        host: 0.0.0.0               # 绑定地址
-        port: 9000                   # 端口
-        profile: tcp-lengthfield-json  # 协议配置
+      - name: my-server              # 必填：唯一标识符
+        transport: TCP               # 必填：TCP、HTTP 或 UDP
+        host: 0.0.0.0                # 绑定地址
+        port: 9000                   # 必填：端口号
+        profile: tcp-lengthfield-json  # 必填：协议 profile
         routing:
           mode: MESSAGE_TYPE         # 路由模式
-        features:
+        features:                    # 可选特性
           ssl:
             enabled: false
           idle:
-            enabled: true
-            readSeconds: 60
+            enabled: false
+          logging:
+            enabled: false
           rateLimit:
             enabled: false
-            requestsPerSecond: 100
+          connectionLimit:
+            enabled: false
 ----
 
+=== 基本服务器属性
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`name`
+|_(必填)_
+|String
+|此服务器的唯一标识符。用于日志和指标。
+
+|`transport`
+|_(必填)_
+|enum
+|传输协议：`TCP`、`HTTP` 或 `UDP`。
+
+|`host`
+|`0.0.0.0`
+|String
+|绑定地址。`0.0.0.0` 绑定到所有网络接口。`127.0.0.1` 仅本地。
+
+|`port`
+|_(必填)_
+|int
+|监听的端口号（1-65535）。
+
+|`profile`
+|_(必填)_
+|String
+|协议 Profile 名称。参见 xref:server/profiles.adoc[Profiles] 了解可用选项。
+|===
+
+=== 路由配置
+
+[cols="3,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`routing.mode`
+|`MESSAGE_TYPE`
+|enum
+|如何从消息中提取路由键。
+|===
+
+路由模式：
+
+* `MESSAGE_TYPE` - 从 JSON `type` 字段提取（用于 TCP/UDP）
+* `PATH` - 使用 HTTP 请求路径（用于 HTTP）
+* `WS_PATH` - 使用 WebSocket 路径（用于 WebSocket）
+
+=== 特性配置
+
+特性为服务器 Pipeline 添加可选功能。详细文档请参见 xref:server/features.adoc[特性]。
+
+==== SSL 特性
+
+[source,yaml]
+----
+features:
+  ssl:
+    enabled: true
+    certPath: /path/to/cert.pem      # X.509 证书
+    keyPath: /path/to/key.pem        # 私钥
+----
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`ssl.enabled`
+|`false`
+|boolean
+|启用 SSL/TLS 加密。
+
+|`ssl.certPath`
+|_(启用时必填)_
+|String
+|X.509 证书文件路径（PEM 格式）。
+
+|`ssl.keyPath`
+|_(启用时必填)_
+|String
+|私钥文件路径（PEM 格式）。
+|===
+
+==== 空闲检测特性
+
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    readSeconds: 60                  # 无读取超时
+    writeSeconds: 30                 # 无写入超时
+    allSeconds: 0                    # 无活动超时（0 = 禁用）
+----
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`idle.enabled`
+|`false`
+|boolean
+|启用空闲连接检测。
+
+|`idle.readSeconds`
+|`0`
+|int
+|无读取这么多秒后关闭连接。`0` = 禁用。
+
+|`idle.writeSeconds`
+|`0`
+|int
+|无写入这么多秒后关闭连接。`0` = 禁用。
+
+|`idle.allSeconds`
+|`0`
+|int
+|无活动这么多秒后关闭连接。`0` = 禁用。
+|===
+
+==== 日志特性
+
+[source,yaml]
+----
+features:
+  logging:
+    enabled: true
+    level: DEBUG                     # 日志级别
+----
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`logging.enabled`
+|`false`
+|boolean
+|启用流量日志。
+
+|`logging.level`
+|`DEBUG`
+|String
+|日志级别：`TRACE`、`DEBUG`、`INFO`、`WARN`、`ERROR`。
+|===
+
+==== 限流特性
+
+[source,yaml]
+----
+features:
+  rateLimit:
+    enabled: true
+    requestsPerSecond: 100           # 持续速率
+    burstSize: 150                   # 突发容量
+----
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`rateLimit.enabled`
+|`false`
+|boolean
+|启用限流（令牌桶算法）。
+
+|`rateLimit.requestsPerSecond`
+|`100`
+|int
+|允许的每秒持续请求数。
+
+|`rateLimit.burstSize`
+|`150`
+|int
+|最大突发大小（桶容量）。
+|===
+
+==== 连接限制特性
+
+[source,yaml]
+----
+features:
+  connectionLimit:
+    enabled: true
+    maxConnections: 10000            # 最大并发连接数
+----
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`connectionLimit.enabled`
+|`false`
+|boolean
+|启用连接限制。
+
+|`connectionLimit.maxConnections`
+|`10000`
+|int
+|最大并发连接数。
+|===
+
 == 客户端配置
+
+每个客户端定义为 `clients` 列表中的一项：
 
 [source,yaml]
 ----
 spring:
   netty:
     clients:
-      - name: order-service          # 客户端名称
-        host: 127.0.0.1             # 服务器地址
-        port: 9000                   # 服务器端口
-        profile: tcp-lengthfield-json
-        timeout:
-          connectMs: 5000            # 连接超时
-          requestMs: 10000           # 请求超时
-        pool:
-          maxConnections: 10         # 最大连接数
-          minIdle: 2                 # 最小空闲连接
-        reconnect:
+      - name: order-service          # 必填：唯一标识符
+        host: 127.0.0.1              # 必填：服务器主机
+        port: 9000                   # 必填：服务器端口
+        profile: tcp-lengthfield-json  # 必填：协议 profile
+        pool:                        # 连接池设置
+          maxConnections: 10
+          minIdle: 2
+          maxIdleMs: 60000
+          acquireTimeoutMs: 5000
+        reconnect:                   # 重连设置
           enabled: true
           initialDelayMs: 1000
           maxDelayMs: 30000
           multiplier: 2.0
+          maxRetries: -1
+        heartbeat:                   # 心跳设置
+          enabled: true
+          intervalMs: 30000
+          timeoutMs: 5000
+          message: '{"type":"heartbeat"}'
+        timeout:                     # 超时设置
+          connectMs: 5000
+          requestMs: 10000
+----
+
+=== 基本客户端属性
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`name`
+|_(必填)_
+|String
+|此客户端的唯一标识符。必须与 `@NettyClient(name = "...")` 匹配。
+
+|`host`
+|_(必填)_
+|String
+|服务器主机名或 IP 地址。
+
+|`port`
+|_(必填)_
+|int
+|服务器端口号。
+
+|`profile`
+|_(必填)_
+|String
+|协议 Profile 名称。应与服务器的 Profile 匹配。
+|===
+
+=== 连接池配置
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`pool.maxConnections`
+|`10`
+|int
+|池中的最大连接数。
+
+|`pool.minIdle`
+|`2`
+|int
+|要维护的最小空闲连接数。
+
+|`pool.maxIdleMs`
+|`60000`
+|long
+|连接关闭前的最大空闲时间（毫秒）。
+
+|`pool.acquireTimeoutMs`
+|`5000`
+|long
+|等待获取连接的超时时间（毫秒）。
+|===
+
+=== 重连配置
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`reconnect.enabled`
+|`true`
+|boolean
+|启用自动重连。
+
+|`reconnect.initialDelayMs`
+|`1000`
+|long
+|首次重连尝试前的初始延迟（毫秒）。
+
+|`reconnect.maxDelayMs`
+|`30000`
+|long
+|重连尝试之间的最大延迟（毫秒）。
+
+|`reconnect.multiplier`
+|`2.0`
+|double
+|指数退避乘数。
+
+|`reconnect.maxRetries`
+|`-1`
+|int
+|最大重连尝试次数。`-1` = 无限。
+|===
+
+=== 心跳配置
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`heartbeat.enabled`
+|`false`
+|boolean
+|启用心跳保活。
+
+|`heartbeat.intervalMs`
+|`30000`
+|long
+|心跳消息之间的间隔（毫秒）。
+
+|`heartbeat.timeoutMs`
+|`5000`
+|long
+|等待心跳响应的超时时间（毫秒）。
+
+|`heartbeat.message`
+|`{"type":"heartbeat"}`
+|String
+|心跳消息内容（JSON 字符串）。
+|===
+
+=== 超时配置
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`timeout.connectMs`
+|`5000`
+|long
+|连接建立超时（毫秒）。
+
+|`timeout.requestMs`
+|`10000`
+|long
+|默认请求/响应超时（毫秒）。可通过 `@NettyRequest(timeout = ...)` 按方法覆盖。
+|===
+
+== 可观测性配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    observability:
+      metrics: true                  # 启用 Micrometer 指标
+      health: true                   # 启用健康检查
+----
+
+[cols="2,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`observability.metrics`
+|`true`
+|boolean
+|启用 Micrometer 指标集成。
+
+|`observability.health`
+|`true`
+|boolean
+|启用健康检查指示器。
+|===
+
+== 完整示例
+
+[source,yaml]
+----
+spring:
+  netty:
+    enabled: true
+
+    defaults:
+      threads:
+        boss: 1
+        worker: 0
+      transport:
+        prefer: AUTO
+      shutdown:
+        graceful: true
+        quietPeriodMs: 200
+        timeoutMs: 3000
+
+    servers:
+      # 带 JSON 编解码器的 TCP 服务器
+      - name: tcp-server
+        transport: TCP
+        host: 0.0.0.0
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
+        features:
+          idle:
+            enabled: true
+            readSeconds: 60
+          logging:
+            enabled: true
+            level: DEBUG
+          connectionLimit:
+            enabled: true
+            maxConnections: 10000
+
+      # HTTP REST API 服务器
+      - name: http-server
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH
+        features:
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 1000
+            burstSize: 1500
+
+      # WebSocket 服务器
+      - name: ws-server
+        transport: HTTP
+        port: 8081
+        profile: websocket
+        routing:
+          mode: WS_PATH
+        features:
+          idle:
+            enabled: true
+            allSeconds: 300
+
+    clients:
+      - name: order-service
+        host: order.internal
+        port: 9000
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 20
+          minIdle: 5
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 30000
         heartbeat:
           enabled: true
           intervalMs: 30000
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
+
+      - name: notification-service
+        host: notify.internal
+        port: 9001
+        profile: tcp-lengthfield-json
+        pool:
+          maxConnections: 5
+        timeout:
+          requestMs: 30000
+
+    observability:
+      metrics: true
+      health: true
+
+# Actuator 端点暴露
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,netty,prometheus
 ----
-
-== 配置属性参考
-
-=== 服务端属性
-
-[cols="3,1,1,4"]
-|===
-|属性 |默认值 |类型 |描述
-
-|`name`
-|必填
-|String
-|服务器唯一名称
-
-|`transport`
-|`TCP`
-|enum
-|传输类型: TCP, HTTP, UDP
-
-|`port`
-|必填
-|int
-|监听端口
-
-|`profile`
-|必填
-|String
-|协议配置名称
-|===
-
-=== 客户端属性
-
-[cols="3,1,1,4"]
-|===
-|属性 |默认值 |类型 |描述
-
-|`name`
-|必填
-|String
-|客户端唯一名称
-
-|`host`
-|必填
-|String
-|服务器地址
-
-|`port`
-|必填
-|int
-|服务器端口
-
-|`profile`
-|必填
-|String
-|协议配置名称
-|===

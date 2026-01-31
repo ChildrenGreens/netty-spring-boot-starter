@@ -1,75 +1,180 @@
 = Netty Spring Boot Starter
-:page-pagination:
 
-为 Spring Boot 3.x 应用提供声明式 Netty 服务端和客户端支持。
+一个全面的 Spring Boot Starter，用于使用 Netty 构建高性能网络应用。支持 TCP/UDP/HTTP/WebSocket 协议，提供声明式配置和基于注解的路由。
 
-[.lead]
-通过简单的注解和配置，快速构建高性能网络应用。
+== 为什么选择 Netty Spring Boot Starter？
 
-== 特性
+使用原生 Netty 构建网络应用需要大量模板代码来管理服务器生命周期、协议处理和 Spring 集成。本 Starter 消除了这些复杂性：
 
-* *声明式服务端* - 使用 `@NettyMessageController` 和 `@NettyController` 注解定义消息处理器
-* *声明式客户端* - 类似 OpenFeign 的 `@NettyClient` 接口代理
-* *多协议支持* - TCP、HTTP、WebSocket、UDP
-* *连接池* - 客户端连接池，支持自动重连和心跳
-* *可扩展* - 自定义 Profile、Feature、Pipeline 配置器
-* *Spring Boot 集成* - 自动配置、Actuator 端点
+[cols="2,3,3"]
+|===
+|挑战 |原生 Netty |使用本 Starter
 
-== 快速示例
+|服务器配置
+|50+ 行引导代码
+|5 行 YAML 配置
 
-=== 服务端
+|协议处理
+|手动配置 pipeline
+|一行 profile 选择
 
-[source,java]
+|请求路由
+|自定义处理器逻辑
+|`@NettyMessageMapping("type")`
+
+|Spring 集成
+|手动装配 Bean
+|完全自动配置
+
+|客户端连接
+|手动管理 Channel
+|`@NettyClient` 接口代理
+|===
+
+== 核心特性
+
+*一套配置，多种协议*::
+通过单一 YAML 配置启动 TCP/HTTP/WebSocket/UDP 服务器。切换协议无需修改代码。
+
+*基于注解的路由*::
+像 Spring MVC 一样开发处理器，使用 `@NettyController`、`@NettyMessageMapping` 和参数注解如 `@PathVar`、`@Body`、`@Query`。
+
+*基于 Profile 的协议栈*::
+预配置的协议 Profile（`tcp-lengthfield-json`、`http1-json`、`websocket` 等）自动处理帧分割和编解码。
+
+*声明式客户端*::
+使用 `@NettyClient` 注解定义客户端接口。框架自动生成代理，支持连接池、自动重连和心跳。
+
+*生产就绪*::
+内置 Micrometer 指标、健康检查和 Actuator 端点的可观测性支持。包含优雅关闭功能。
+
+*高度可扩展*::
+通过自定义 `Profile`、`NettyCodec`、`FeatureProvider` 或 `NettyPipelineConfigurer` 扩展高级用例。
+
+== 架构概览
+
+[source,text]
 ----
-@NettyMessageController
-public class PingHandler {
-
-    @NettyMessageMapping("ping")
-    public Map<String, Object> handlePing() {
-        return Map.of(
-            "type", "pong",
-            "timestamp", System.currentTimeMillis()
-        );
-    }
-}
-----
-
-=== 客户端
-
-[source,java]
-----
-@NettyClient(name = "my-server")
-public interface MyServerClient {
-
-    @NettyRequest("ping")
-    PongResponse ping();
-}
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              application.yml                                 │
+│  ┌──────────────────────────────┐    ┌───────────────────────────────────┐  │
+│  │ spring.netty.servers[*]      │    │ spring.netty.clients[*]           │  │
+│  │   - name: tcp-server         │    │   - name: order-service           │  │
+│  │     port: 9000               │    │     host: 127.0.0.1               │  │
+│  │     profile: tcp-json        │    │     port: 9000                    │  │
+│  └──────────────────────────────┘    └───────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                     │                                │
+                     ▼                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        netty-spring-boot-context                             │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                           共享组件                                   │    │
+│  │   NettyCodec (JSON/Protobuf)  │  Profile  │  InboundMessage         │    │
+│  │   OutboundMessage  │  NettyContext  │  ArgumentResolver             │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌───────────────────────────┐      ┌────────────────────────────────────┐  │
+│  │       服务端组件           │      │          客户端组件                 │  │
+│  │  ┌─────────────────────┐  │      │  ┌──────────────────────────────┐  │  │
+│  │  │ NettyServerOrchestra│  │      │  │ NettyClientOrchestrator      │  │  │
+│  │  │ PipelineAssembler   │  │      │  │ ConnectionPool               │  │  │
+│  │  │ DispatcherHandler   │  │      │  │ ReconnectManager             │  │  │
+│  │  │ Router & Dispatcher │  │      │  │ HeartbeatManager             │  │  │
+│  │  │ @NettyController    │  │      │  │ @NettyClient Proxy           │  │  │
+│  │  └─────────────────────┘  │      │  └──────────────────────────────┘  │  │
+│  └───────────────────────────┘      └────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                     │                                │
+                     ▼                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        netty-spring-boot-actuator                            │
+│    Metrics (Micrometer)  │  健康检查  │  /actuator/netty 端点               │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             Netty 运行时                                     │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────────────┐  │
+│  │  BossGroup  │ ─► │ WorkerGroup │ ─► │       ChannelPipeline           │  │
+│  │  (Accept)   │    │  (I/O)      │    │  SSL → Idle → Frame → Codec →   │  │
+│  └─────────────┘    └─────────────┘    │  Dispatcher → ExceptionHandler  │  │
+│                                         └─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ----
 
 == 模块结构
+
+[source,text]
+----
+netty-spring-boot/
+├── netty-spring-boot-context/        # 核心：注解、处理器、路由、编解码
+├── netty-spring-boot-actuator/       # 指标、健康检查、端点
+├── netty-spring-boot-autoconfigure/  # Spring Boot 自动配置
+└── netty-spring-boot-starter/        # Starter POM（依赖聚合）
+----
 
 [cols="2,4"]
 |===
 |模块 |描述
 
-|`netty-spring-boot-starter`
-|Starter POM，引入所有依赖
-
-|`netty-spring-boot-autoconfigure`
-|Spring Boot 自动配置
-
 |`netty-spring-boot-context`
-|核心功能：注解、处理器、路由、编解码器
+|核心 API，包括注解（`@NettyController`、`@NettyClient`）、消息抽象（`InboundMessage`、`OutboundMessage`）、编解码系统、Profile 系统、路由和 Pipeline 组装。
 
 |`netty-spring-boot-actuator`
-|Actuator 端点和指标
+|Spring Boot Actuator 集成，提供 Micrometer 指标、健康指示器和管理端点，用于监控 Netty 服务器和客户端。
+
+|`netty-spring-boot-autoconfigure`
+|自动配置类，根据 `application.yml` 属性自动配置 Netty 服务器和客户端。
+
+|`netty-spring-boot-starter`
+|Starter POM，聚合所有必要依赖。添加此单一依赖即可使用框架。
 |===
 
-== 下一步
+== 支持的协议
 
-* xref:getting-started.adoc[快速开始] - 5 分钟入门教程
-* xref:configuration.adoc[配置] - 完整配置参考
-* xref:server/handlers.adoc[处理器] - 服务端消息处理
+[cols="1,2,3"]
+|===
+|协议 |Profile |使用场景
+
+|TCP
+|`tcp-lengthfield-json`
+|高性能 RPC、游戏服务器、IoT
+
+|TCP
+|`tcp-line`
+|基于文本的协议、telnet 风格
+
+|HTTP/1.1
+|`http1-json`
+|REST API、Webhook
+
+|WebSocket
+|`websocket`
+|实时消息、即时更新
+
+|UDP
+|`udp-json`
+|低延迟消息、广播
+|===
+
+== 环境要求
+
+* Java {java-version} 或更高版本
+* Spring Boot {spring-boot-version} 或更高版本
+* Netty 4.1.x（由 Spring Boot 管理）
+
+== 快速链接
+
+* xref:getting-started.adoc[快速开始] - 5 分钟创建你的第一个 Netty 服务器
+* xref:configuration.adoc[配置参考] - 所有可用的配置属性
+* xref:server/handlers.adoc[处理器指南] - 了解不同的处理器类型
+* xref:client/usage.adoc[客户端指南] - 创建声明式 Netty 客户端
+
+== 许可证
+
+本项目采用 https://www.apache.org/licenses/LICENSE-2.0[Apache License 2.0] 许可证。
 
 == 语言
 

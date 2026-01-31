@@ -1,17 +1,36 @@
-= 特性
+= Features
 :page-pagination:
 
-特性 (Feature) 是可选的 Pipeline 组件，提供 SSL 加密、速率限制、空闲检测等横切功能。
+Features 是可选的 Pipeline 组件，用于添加横切关注点功能，如 SSL 加密、速率限制、空闲检测和日志记录。本页介绍所有内置 Features 以及如何创建自定义 Feature。
 
-== 内置特性
+== Feature 概述
+
+Features 按特定顺序添加到 Pipeline 中：
+
+[source,text]
+----
+ChannelPipeline:
+├── [Order 10]  SSL/TLS Handler
+├── [Order 10]  Connection Limit Handler
+├── [Order 50]  Logging Handler
+├── [Order 50]  Rate Limit Handler
+├── [Order 150] Idle State Handler
+├── Profile Handlers (framing, codec)
+├── Dispatcher Handler
+└── Exception Handler
+----
+
+较小的 order 数值会先添加（更靠近网络层），较大的 order 数值会后添加（更靠近应用层）。
+
+== 内置 Features
 
 [cols="2,1,3"]
 |===
-|特性 |顺序 |描述
+|Feature |Order |描述
 
 |`ssl`
 |10
-|SSL/TLS 加密通信
+|SSL/TLS 加密，用于安全通信
 
 |`connectionLimit`
 |10
@@ -23,14 +42,18 @@
 
 |`rateLimit`
 |50
-|每连接令牌桶速率限制
+|基于令牌桶的每连接速率限制
 
 |`idle`
 |150
 |检测并关闭空闲连接
 |===
 
-== SSL/TLS 特性
+== SSL/TLS Feature
+
+启用 SSL/TLS 加密通信。
+
+=== 配置
 
 [source,yaml]
 ----
@@ -38,14 +61,59 @@ spring:
   netty:
     servers:
       - name: secure-server
+        transport: TCP
+        port: 9443
+        profile: tcp-lengthfield-json
         features:
           ssl:
             enabled: true
-            certPath: /etc/ssl/server.crt
-            keyPath: /etc/ssl/server.key
+            certPath: /etc/ssl/server.crt      # <1>
+            keyPath: /etc/ssl/server.key       # <2>
+----
+<1> PEM 格式的 X.509 证书文件
+<2> PEM 格式的私钥文件
+
+=== 生成自签名证书（开发环境）
+
+[source,bash]
+----
+# 生成私钥和证书
+openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
+    -days 365 -nodes -subj "/CN=localhost"
+
+# 验证证书
+openssl x509 -in server.crt -text -noout
 ----
 
-== 连接限制特性
+=== 客户端连接（Java）
+
+[source,java]
+----
+// Java 客户端连接 SSL 服务器
+SSLContext sslContext = SSLContext.getInstance("TLS");
+sslContext.init(null, trustAllCerts, new SecureRandom());
+
+SSLSocketFactory factory = sslContext.getSocketFactory();
+SSLSocket socket = (SSLSocket) factory.createSocket("localhost", 9443);
+socket.startHandshake();
+
+// 现在可以使用 socket.getInputStream() 和 socket.getOutputStream()
+----
+
+=== 生产环境建议
+
+WARNING: 不要在生产环境中使用自签名证书。
+
+* 使用受信任的证书颁发机构（CA）颁发的证书
+* 使用 Let's Encrypt 获取免费的自动化证书
+* 安全存储私钥（文件权限、密钥管理）
+* 在证书过期前进行轮换
+
+== Connection Limit Feature
+
+限制最大并发连接数，防止资源耗尽。
+
+=== 配置
 
 [source,yaml]
 ----
@@ -56,10 +124,89 @@ spring:
         features:
           connectionLimit:
             enabled: true
-            maxConnections: 10000
+            maxConnections: 10000       # <1>
+----
+<1> 允许的最大并发连接数
+
+=== 行为
+
+当达到限制时：
+
+1. 新连接会立即被关闭
+2. 记录警告日志
+3. 现有连接不受影响
+
+[source,text]
+----
+WARN  Connection limit reached (10000), rejecting new connection from /192.168.1.100:54321
 ----
 
-== 速率限制特性
+=== 使用场景
+
+* 防止流量激增时服务器过载
+* 防御基于连接的 DoS 攻击
+* 确保资源公平分配
+
+== Logging Feature
+
+记录所有网络流量，用于调试和监控。
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          logging:
+            enabled: true
+            level: DEBUG           # <1>
+----
+<1> 日志级别：`TRACE`、`DEBUG`、`INFO`、`WARN`、`ERROR`
+
+=== 日志输出示例
+
+[source,text]
+----
+DEBUG [nioEventLoopGroup-3-1] LoggingHandler - [id: 0x12345678, L:/0.0.0.0:9000 - R:/192.168.1.100:54321] RECEIVED:
+         +-------------------------------------------------+
+         |  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f |
++--------+-------------------------------------------------+----------------+
+|00000000| 7b 22 74 79 70 65 22 3a 22 70 69 6e 67 22 7d    |{"type":"ping"} |
++--------+-------------------------------------------------+----------------+
+----
+
+=== 日志级别
+
+[cols="1,4"]
+|===
+|级别 |内容
+
+|`TRACE`
+|所有字节的十六进制转储 + 事件详情
+
+|`DEBUG`
+|数据的十六进制转储 + 连接事件
+
+|`INFO`
+|仅连接事件（连接、断开）
+
+|`WARN`
+|仅警告和错误
+
+|`ERROR`
+|仅错误
+|===
+
+WARNING: `TRACE` 和 `DEBUG` 级别可能会显著影响性能和磁盘使用。仅用于调试。
+
+== Rate Limit Feature
+
+实现基于令牌桶的每连接速率限制，防止滥用。
+
+=== 配置
 
 [source,yaml]
 ----
@@ -70,11 +217,46 @@ spring:
         features:
           rateLimit:
             enabled: true
-            requestsPerSecond: 100
-            burstSize: 150
+            requestsPerSecond: 100     # <1>
+            burstSize: 150             # <2>
+----
+<1> 持续速率（每秒添加的令牌数）
+<2> 最大突发量（桶容量）
+
+=== 令牌桶算法
+
+[source,text]
+----
+桶容量：150 个令牌
+填充速率：100 令牌/秒
+
+时间 0.0s：桶 = 150（满）
+           客户端发送 50 个请求 → 桶 = 100
+时间 0.1s：桶 = 110（补充了 10 个令牌）
+           客户端发送 20 个请求 → 桶 = 90
+时间 0.5s：桶 = 130（补充了 40 个令牌）
+           客户端发送 140 个请求 → 130 个被允许，10 个被拒绝
 ----
 
-== 空闲检测特性
+=== 限流时的行为
+
+当超过速率限制时：
+
+1. 请求被拒绝
+2. 连接保持打开
+3. 客户端收到错误响应
+
+=== 使用场景
+
+* API 速率限制
+* 防止单个客户端滥用
+* 保护后端服务免受过载
+
+== Idle Detection Feature
+
+检测空闲连接并触发相应操作（通常是关闭连接）。
+
+=== 配置
 
 [source,yaml]
 ----
@@ -85,19 +267,156 @@ spring:
         features:
           idle:
             enabled: true
-            readSeconds: 60
-            writeSeconds: 30
-            allSeconds: 0
+            readSeconds: 60        # <1>
+            writeSeconds: 30       # <2>
+            allSeconds: 0          # <3>
+----
+<1> 60 秒内无数据读取则关闭
+<2> 30 秒内无数据写入则关闭
+<3> N 秒内无任何活动则关闭（0 = 禁用）
+
+=== 空闲类型
+
+[cols="2,4"]
+|===
+|类型 |触发条件
+
+|读空闲
+|`readSeconds` 秒内未从客户端接收数据
+
+|写空闲
+|`writeSeconds` 秒内未向客户端发送数据
+
+|全部空闲
+|`allSeconds` 秒内无任何数据发送或接收
+|===
+
+=== 常见配置
+
+.长轮询服务器（保持连接活跃）
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    readSeconds: 300    # 5 分钟
+    writeSeconds: 0     # 无写超时
+    allSeconds: 0
 ----
 
-== 自定义特性
+.WebSocket 服务器（检测死连接）
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    allSeconds: 60      # 1 分钟无活动则关闭
+----
 
-实现 `FeatureProvider` 接口创建自定义特性：
+.RPC 服务器（短期请求）
+[source,yaml]
+----
+features:
+  idle:
+    enabled: true
+    readSeconds: 30     # 关闭慢客户端
+    writeSeconds: 0
+----
+
+== 组合 Features
+
+可以组合多个 Features 实现全面保护：
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: production-server
+        transport: TCP
+        port: 9443
+        profile: tcp-lengthfield-json
+        features:
+          # 加密
+          ssl:
+            enabled: true
+            certPath: /etc/ssl/server.crt
+            keyPath: /etc/ssl/server.key
+
+          # 连接管理
+          connectionLimit:
+            enabled: true
+            maxConnections: 50000
+
+          # 速率限制
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 1000
+            burstSize: 2000
+
+          # 空闲超时
+          idle:
+            enabled: true
+            readSeconds: 120
+            writeSeconds: 0
+            allSeconds: 0
+
+          # 调试日志（生产环境禁用）
+          logging:
+            enabled: false
+----
+
+== 自定义 Feature
+
+通过实现 `FeatureProvider` 接口创建自定义 Feature。
+
+=== FeatureProvider 接口
 
 [source,java]
 ----
+public interface FeatureProvider {
+    /**
+     * 唯一的 Feature 名称。
+     */
+    String getName();
+
+    /**
+     * Pipeline 顺序（数值越小越靠近网络层）。
+     */
+    int getOrder();
+
+    /**
+     * 检查此服务器是否启用该 Feature。
+     */
+    boolean isEnabled(ServerSpec serverSpec);
+
+    /**
+     * 配置 Pipeline。
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+}
+----
+
+=== 示例：IP 白名单 Feature
+
+[source,java]
+----
+import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
+import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.ipfilter.IpFilterRule;
+import io.netty.handler.ipfilter.IpFilterRuleType;
+import io.netty.handler.ipfilter.RuleBasedIpFilter;
+import org.springframework.stereotype.Component;
+
+import java.net.InetSocketAddress;
+import java.util.List;
+import java.util.Map;
+
 @Component
 public class IpWhitelistFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 5;  // 在 SSL 之前
 
     @Override
     public String getName() {
@@ -106,17 +425,141 @@ public class IpWhitelistFeatureProvider implements FeatureProvider {
 
     @Override
     public int getOrder() {
-        return 5;  // 在 SSL 之前
+        return ORDER;
     }
 
     @Override
     public boolean isEnabled(ServerSpec serverSpec) {
-        // 检查配置
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> config = (Map<String, Object>) features.get("ipWhitelist");
+        return config != null && Boolean.TRUE.equals(config.get("enabled"));
     }
 
     @Override
     public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        // 添加 IP 过滤处理器
+        Map<String, Object> config = (Map<String, Object>)
+            serverSpec.getFeatures().get("ipWhitelist");
+        List<String> allowedIps = (List<String>) config.get("allowedIps");
+
+        IpFilterRule[] rules = allowedIps.stream()
+            .map(ip -> new IpFilterRule() {
+                @Override
+                public boolean matches(InetSocketAddress remoteAddress) {
+                    return remoteAddress.getAddress().getHostAddress().equals(ip);
+                }
+                @Override
+                public IpFilterRuleType ruleType() {
+                    return IpFilterRuleType.ACCEPT;
+                }
+            })
+            .toArray(IpFilterRule[]::new);
+
+        pipeline.addLast("ipFilter", new RuleBasedIpFilter(rules));
     }
 }
 ----
+
+使用方法：
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: admin-server
+        features:
+          ipWhitelist:
+            enabled: true
+            allowedIps:
+              - "192.168.1.100"
+              - "10.0.0.0"
+----
+
+=== 示例：Metrics Feature
+
+[source,java]
+----
+@Component
+public class MetricsFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 180;  // 在 idle 之后，dispatcher 之前
+
+    private final MeterRegistry meterRegistry;
+
+    public MetricsFeatureProvider(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    @Override
+    public String getName() {
+        return "metrics";
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> config = (Map<String, Object>) features.get("metrics");
+        return config != null && Boolean.TRUE.equals(config.get("enabled"));
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        String serverName = serverSpec.getName();
+        pipeline.addLast("metricsHandler",
+            new MetricsHandler(meterRegistry, serverName));
+    }
+}
+----
+
+== Feature Order 参考
+
+[cols="1,2,4"]
+|===
+|Order |Feature |原因
+
+|5
+|IP Filter
+|在任何处理之前阻止不需要的 IP
+
+|10
+|SSL
+|在其他 Handler 看到数据之前解密
+
+|10
+|Connection Limit
+|尽早拒绝以节省资源
+
+|50
+|Logging
+|记录解密后的数据
+
+|50
+|Rate Limit
+|在连接建立后进行限制
+
+|150
+|Idle Detection
+|在速率限制之后检测空闲
+
+|200+
+|Custom Business Features
+|应用特定的 Feature
+
+|_Profile_
+|Framing, Codec
+|协议特定的 Handler
+
+|_System_
+|Dispatcher
+|路由到 Handler
+
+|_System_
+|Exception Handler
+|处理错误
+|===

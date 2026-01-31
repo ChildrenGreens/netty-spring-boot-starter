@@ -1,93 +1,191 @@
-= 客户端使用
+= 客户端使用指南
 :page-pagination:
 
-Netty Spring Boot Starter 提供类似 Spring Cloud OpenFeign 的声明式客户端接口。
+Netty Spring Boot Starter 提供了类似于 Spring Cloud OpenFeign 的声明式客户端接口。定义一个接口，添加注解，框架会自动生成一个代理来处理连接管理、序列化和请求/响应匹配。
+
+== 概述
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           您的应用程序                                        │
+│                                                                              │
+│  @Service                                                                    │
+│  public class OrderService {                                                 │
+│      @Autowired                                                              │
+│      private OrderClient orderClient;  ←── 由 Spring 注入                    │
+│                                                                              │
+│      public void process() {                                                 │
+│          orderClient.ping();           ←── 方法调用                          │
+│      }                                                                       │
+│  }                                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      ClientProxyFactory（框架）                               │
+│                                                                              │
+│  1. 将请求序列化为 JSON                                                       │
+│  2. 从连接池获取连接                                                          │
+│  3. 发送带有关联 ID 的请求                                                    │
+│  4. 等待响应（或超时）                                                        │
+│  5. 反序列化响应                                                              │
+│  6. 返回给调用方                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         连接池                                               │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                           │
+│  │ Channel │ │ Channel │ │ Channel │ │ Channel │  ←── 托管连接              │
+│  │  空闲   │ │  空闲   │ │  活跃   │ │  空闲   │                           │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                              远程服务器
+----
 
 == 快速开始
 
-=== 步骤 1: 添加客户端配置
+=== 步骤 1：添加客户端配置
+
+在 `application.yml` 中：
 
 [source,yaml]
 ----
 spring:
   netty:
     clients:
-      - name: order-service
-        host: 127.0.0.1
-        port: 9000
-        profile: tcp-lengthfield-json
+      - name: order-service              # <1>
+        host: 127.0.0.1                  # <2>
+        port: 9000                       # <3>
+        profile: tcp-lengthfield-json    # <4>
         timeout:
-          connectMs: 5000
-          requestMs: 10000
+          connectMs: 5000                # <5>
+          requestMs: 10000               # <6>
 ----
+<1> 唯一的客户端名称（与 `@NettyClient(name = "...")` 匹配）
+<2> 服务器主机名或 IP
+<3> 服务器端口
+<4> 协议配置文件（必须与服务器匹配）
+<5> 连接超时时间
+<6> 默认请求超时时间
 
-=== 步骤 2: 定义客户端接口
+=== 步骤 2：定义客户端接口
 
 [source,java]
 ----
-@NettyClient(name = "order-service")
+package com.example.client;
+
+import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
+import com.childrengreens.netty.spring.boot.context.annotation.NettyRequest;
+import com.childrengreens.netty.spring.boot.context.annotation.Param;
+
+import java.util.concurrent.CompletableFuture;
+
+@NettyClient(name = "order-service")  // <1>
 public interface OrderClient {
 
-    @NettyRequest(type = "ping")
+    @NettyRequest(type = "ping")       // <2>
     PongResponse ping();
 
-    @NettyRequest(type = "order.create", timeout = 5000)
+    @NettyRequest(type = "order.create", timeout = 5000)  // <3>
     OrderResponse createOrder(OrderRequest request);
 
     @NettyRequest(type = "order.query")
-    CompletableFuture<OrderResponse> queryOrderAsync(@Param("orderId") String orderId);
+    CompletableFuture<OrderResponse> queryOrderAsync(  // <4>
+            @Param("orderId") String orderId);
 
-    @NettyRequest(value = "notify", oneWay = true)
+    @NettyRequest(value = "notify", oneWay = true)  // <5>
     void notifyUser(@Param("userId") Long userId, @Param("message") String message);
 }
 ----
+<1> 将接口链接到客户端配置
+<2> 发送到服务器的消息类型
+<3> 单个方法的超时覆盖
+<4> 异步方法返回 `CompletableFuture`
+<5> 单向调用（发送后即忘）
 
-=== 步骤 3: 启用客户端扫描
+=== 步骤 3：启用客户端扫描
 
 [source,java]
 ----
+package com.example;
+
+import com.childrengreens.netty.spring.boot.context.annotation.EnableNettyClients;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
 @SpringBootApplication
-@EnableNettyClients(basePackages = "com.example.client")
+@EnableNettyClients(basePackages = "com.example.client")  // <1>
 public class Application {
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
     }
 }
 ----
+<1> 扫描包中的 `@NettyClient` 接口
 
-=== 步骤 4: 注入并使用
+=== 步骤 4：注入并使用
 
 [source,java]
 ----
+package com.example.service;
+
+import com.example.client.OrderClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
 @Service
 public class OrderService {
 
     @Autowired
-    private OrderClient orderClient;
+    private OrderClient orderClient;  // <1>
 
     public void process() {
         // 同步调用
-        PongResponse pong = orderClient.ping();
+        PongResponse pong = orderClient.ping();  // <2>
+        System.out.println("服务器响应: " + pong);
+
+        // 带请求对象的同步调用
+        OrderRequest request = new OrderRequest("product-123", 2);
+        OrderResponse response = orderClient.createOrder(request);
+        System.out.println("订单已创建: " + response.getOrderId());
 
         // 异步调用
-        orderClient.queryOrderAsync("order-456")
-                .thenAccept(order -> System.out.println("Order: " + order));
+        orderClient.queryOrderAsync("order-456")  // <3>
+                .thenAccept(order -> System.out.println("订单: " + order))
+                .exceptionally(ex -> {
+                    System.err.println("查询失败: " + ex.getMessage());
+                    return null;
+                });
 
-        // 单向调用
-        orderClient.notifyUser(123L, "Your order is ready!");
+        // 发送后即忘
+        orderClient.notifyUser(123L, "您的订单已准备好!");  // <4>
     }
 }
 ----
+<1> Spring 注入生成的代理
+<2> 阻塞直到收到响应
+<3> 立即返回，稍后调用回调
+<4> 立即返回，不期望响应
 
 == 客户端注解
 
 === @NettyClient
 
-标记接口为 Netty 客户端：
+将接口标记为 Netty 客户端。
 
 [source,java]
 ----
-@NettyClient(name = "order-service")
+@NettyClient(name = "order-service")  // 必需：匹配配置名称
+public interface OrderClient {
+    // ...
+}
+
+// 替代语法
+@NettyClient(value = "order-service")
 public interface OrderClient {
     // ...
 }
@@ -95,42 +193,331 @@ public interface OrderClient {
 
 === @NettyRequest
 
-标记方法为请求：
+将方法标记为请求。
 
 [source,java]
 ----
 @NettyRequest(
-    type = "user.get",      // 消息类型 (必填)
-    timeout = 5000,         // 超时毫秒 (可选)
-    oneWay = false          // 是否单向 (可选)
+    type = "user.get",      // 消息类型（必需）
+    timeout = 5000,         // 超时时间，毫秒（可选，覆盖默认值）
+    oneWay = false          // 如果为 true，则不期望响应（可选）
 )
+User getUser(Long id);
+
+// 简短形式
+@NettyRequest("user.get")
 User getUser(Long id);
 ----
 
 === @Param
 
-绑定方法参数到命名字段：
+将方法参数绑定到命名字段。
 
 [source,java]
 ----
 @NettyRequest("user.search")
 List<User> searchUsers(
-    @Param("name") String name,
-    @Param("age") Integer age
+    @Param("name") String name,            // 必需参数
+    @Param(value = "age", required = false) Integer age  // 可选参数
 );
 
-// 发送: {"type":"user.search","name":"John","age":25}
+// 发送为: {"type":"user.search","name":"John","age":25}
 ----
 
-== 错误处理
+== 参数绑定
+
+=== 单对象参数
+
+如果方法有一个不带 `@Param` 的参数，它将被序列化为整个负载：
+
+[source,java]
+----
+@NettyRequest("order.create")
+OrderResponse createOrder(OrderRequest request);
+
+// OrderRequest { productId: "123", quantity: 2 }
+// 发送为: {"type":"order.create","productId":"123","quantity":2}
+----
+
+=== 多命名参数
+
+对多个参数使用 `@Param`：
+
+[source,java]
+----
+@NettyRequest("transfer.execute")
+TransferResponse transfer(
+    @Param("fromAccount") String from,
+    @Param("toAccount") String to,
+    @Param("amount") BigDecimal amount
+);
+
+// 发送为: {"type":"transfer.execute","fromAccount":"A","toAccount":"B","amount":100.00}
+----
+
+=== 混合参数
+
+组合对象和命名参数：
+
+[source,java]
+----
+@NettyRequest("order.update")
+OrderResponse updateOrder(
+    @Param("orderId") String orderId,
+    OrderUpdateRequest updates  // 合并到负载中
+);
+----
+
+== 返回类型
+
+=== 同步（阻塞）
+
+[source,java]
+----
+@NettyRequest("user.get")
+User getUser(Long id);  // 阻塞直到响应或超时
+----
+
+=== 异步（非阻塞）
+
+[source,java]
+----
+@NettyRequest("user.get")
+CompletableFuture<User> getUserAsync(Long id);
+
+// 使用方式
+client.getUserAsync(123L)
+    .thenApply(user -> processUser(user))
+    .thenAccept(result -> saveResult(result))
+    .exceptionally(ex -> {
+        handleError(ex);
+        return null;
+    });
+----
+
+=== Void（无返回值）
+
+[source,java]
+----
+@NettyRequest("event.log")
+void logEvent(Event event);  // 等待确认
+
+@NettyRequest(value = "event.fire", oneWay = true)
+void fireEvent(Event event);  // 立即返回，无确认
+----
+
+== 超时处理
+
+=== 全局超时
+
+在配置中设置：
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        timeout:
+          requestMs: 10000  # 所有请求 10 秒
+----
+
+=== 单方法超时
+
+在注解中覆盖：
+
+[source,java]
+----
+@NettyRequest(type = "slow.operation", timeout = 60000)  // 60 秒
+SlowResponse slowOperation(SlowRequest request);
+----
+
+=== 处理超时异常
 
 [source,java]
 ----
 try {
-    User user = userClient.getUser(999L);
+    OrderResponse response = orderClient.createOrder(request);
 } catch (TimeoutException e) {
-    log.warn("请求超时");
+    // 请求超时
+    log.warn("订单创建超时");
+}
+
+// 对于异步调用
+orderClient.createOrderAsync(request)
+    .orTimeout(5, TimeUnit.SECONDS)
+    .exceptionally(ex -> {
+        if (ex instanceof TimeoutException) {
+            log.warn("异步订单创建超时");
+        }
+        return null;
+    });
+----
+
+== 错误处理
+
+=== 服务器错误
+
+当服务器返回错误响应时：
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(999L);  // 不存在的用户
+} catch (ClientException e) {
+    // 服务器返回错误
+    int code = e.getCode();        // 例如 404
+    String message = e.getMessage(); // 例如 "用户未找到"
+}
+----
+
+=== 连接错误
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(123L);
 } catch (ConnectionException e) {
-    log.error("连接失败: {}", e.getMessage());
+    // 连接失败或连接丢失
+    log.error("连接错误: {}", e.getMessage());
+}
+----
+
+=== 超时错误
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(123L);
+} catch (TimeoutException e) {
+    // 请求超时
+    log.error("请求超时，超过 {} 毫秒", e.getTimeoutMs());
+}
+----
+
+== 多客户端
+
+您可以在同一应用程序中定义多个客户端：
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: user-service
+        host: user.internal
+        port: 9001
+        profile: tcp-lengthfield-json
+
+      - name: order-service
+        host: order.internal
+        port: 9002
+        profile: tcp-lengthfield-json
+
+      - name: notification-service
+        host: notify.internal
+        port: 9003
+        profile: tcp-lengthfield-json
+        timeout:
+          requestMs: 30000  # 通知可能较慢
+----
+
+[source,java]
+----
+@NettyClient(name = "user-service")
+public interface UserClient {
+    @NettyRequest("user.get")
+    User getUser(Long id);
+}
+
+@NettyClient(name = "order-service")
+public interface OrderClient {
+    @NettyRequest("order.create")
+    OrderResponse createOrder(OrderRequest request);
+}
+
+@NettyClient(name = "notification-service")
+public interface NotificationClient {
+    @NettyRequest(value = "notify.send", oneWay = true)
+    void sendNotification(Notification notification);
+}
+----
+
+== 最佳实践
+
+=== 1. 对非关键路径使用异步
+
+[source,java]
+----
+// 好的做法：非阻塞通知
+notificationClient.sendNotificationAsync(notification)
+    .exceptionally(ex -> {
+        log.warn("通知失败，稍后重试", ex);
+        return null;
+    });
+
+// 无需等待即可继续处理
+return orderResponse;
+----
+
+=== 2. 设置适当的超时
+
+[source,java]
+----
+// 快速操作：短超时
+@NettyRequest(type = "cache.get", timeout = 1000)
+CacheEntry getCached(String key);
+
+// 慢速操作：较长超时
+@NettyRequest(type = "report.generate", timeout = 120000)
+Report generateReport(ReportRequest request);
+----
+
+=== 3. 优雅地处理错误
+
+[source,java]
+----
+public User getUserWithFallback(Long id) {
+    try {
+        return userClient.getUser(id);
+    } catch (TimeoutException e) {
+        log.warn("用户服务超时，使用缓存数据");
+        return userCache.get(id);
+    } catch (ConnectionException e) {
+        log.error("用户服务不可用");
+        throw new ServiceUnavailableException("用户服务已关闭");
+    }
+}
+----
+
+=== 4. 对事件使用发送后即忘
+
+[source,java]
+----
+// 不等待非关键事件的确认
+@NettyRequest(value = "analytics.track", oneWay = true)
+void trackEvent(AnalyticsEvent event);
+----
+
+=== 5. 分组相关操作
+
+[source,java]
+----
+@NettyClient(name = "user-service")
+public interface UserClient {
+    @NettyRequest("user.create")
+    User createUser(CreateUserRequest request);
+
+    @NettyRequest("user.get")
+    User getUser(Long id);
+
+    @NettyRequest("user.update")
+    User updateUser(Long id, UpdateUserRequest request);
+
+    @NettyRequest("user.delete")
+    void deleteUser(Long id);
+
+    @NettyRequest("user.search")
+    List<User> searchUsers(UserSearchCriteria criteria);
 }
 ----

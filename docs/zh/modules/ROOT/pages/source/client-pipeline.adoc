@@ -1,87 +1,614 @@
-= 客户端 Pipeline 源码解析
+= 客户端 Pipeline 源码分析
 :page-pagination:
 
-本文深入分析客户端 Pipeline 组装机制的源码实现。
+本文档深入分析客户端管道（Pipeline）的组装机制。理解这些代码有助于您有效地自定义客户端行为。
 
 == 架构概览
 
 [source,text]
 ----
-┌─────────────────────────────────────────────────────────────────────┐
-│                     ClientPipelineAssembler                          │
-│                                                                      │
-│  组装流程:                                                           │
-│  1. 应用 ClientProfile (帧编解码)                                    │
-│  2. 添加 IdleStateHandler (如果配置)                                 │
-│  3. 添加 CodecHandler (JSON 编解码)                                  │
-│  4. 添加 ClientResponseHandler (响应处理)                            │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                           NettyClientOrchestrator                                        │
+│                                                                                          │
+│  客户端启动时：                                                                            │
+│  ┌───────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  Bootstrap bootstrap = new Bootstrap();                                            │  │
+│  │  bootstrap.handler(new ChannelInitializer<SocketChannel>() {                      │  │
+│  │      @Override                                                                     │  │
+│  │      protected void initChannel(SocketChannel ch) {                               │  │
+│  │          pipelineAssembler.assemble(ch.pipeline(), clientSpec, requestInvoker);  │  │
+│  │      }                                                                             │  │
+│  │  });                                                                               │  │
+│  └───────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                           ClientPipelineAssembler                                        │
+│                                                                                          │
+│  assemble(pipeline, clientSpec, requestInvoker)                                         │
+│  ┌───────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  步骤 1：应用 ClientProfile（帧编码/解码）                                            │  │
+│  │  步骤 2：添加 IdleStateHandler（如果配置）                                            │  │
+│  │  步骤 3：添加 CodecHandler（JSON 编码/解码）                                          │  │
+│  │  步骤 4：添加 ClientResponseHandler（响应处理）                                       │  │
+│  └───────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ----
 
-== 核心方法 assemble()
+== 核心类：NettyClientOrchestrator
+
+`NettyClientOrchestrator` 管理所有客户端实例的生命周期并触发 Pipeline 组装。
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/NettyClientOrchestrator.java
+----
+
+=== 客户端启动流程
+
+[source,java]
+----
+private void startClient(ClientSpec spec) throws Exception {
+    logger.info("Starting client [{}] connecting to {}:{} with profile [{}]",
+            spec.getName(), spec.getHost(), spec.getPort(), spec.getProfile());
+
+    // 解析线程配置
+    ThreadsSpec threads = resolveThreads(spec);
+    int workerThreads = threads.getWorker();
+
+    // 创建事件循环组
+    EventLoopGroup workerGroup = transportFactory.createWorkerGroup(workerThreads);
+
+    // 获取编解码器
+    NettyCodec codec = codecRegistry.getDefaultCodec();
+
+    // 创建请求调用器用于请求/响应关联
+    RequestInvoker requestInvoker = new RequestInvoker(spec, codec);
+
+    // 创建引导程序
+    Bootstrap bootstrap = new Bootstrap();
+    bootstrap.group(workerGroup)
+            .channel(transportFactory.getClientChannelClass())
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) spec.getTimeout().getConnectMs())
+            .option(ChannelOption.SO_KEEPALIVE, true)
+            .option(ChannelOption.TCP_NODELAY, true)
+            .handler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    // ★ Pipeline 组装在此处进行
+                    pipelineAssembler.assemble(ch.pipeline(), spec, requestInvoker);
+                }
+            });
+
+    // 创建连接池
+    ConnectionPool connectionPool = new ConnectionPool(spec, bootstrap);
+
+    // 创建重连管理器
+    ReconnectManager reconnectManager = new ReconnectManager(
+            spec, bootstrap, connectionPool, scheduledExecutor);
+    connectionPool.setReconnectManager(reconnectManager);
+
+    // 创建心跳管理器
+    HeartbeatManager heartbeatManager = new HeartbeatManager(
+            spec, connectionPool, requestInvoker, scheduledExecutor);
+
+    // 如果启用则启动心跳
+    if (spec.getHeartbeat().isEnabled()) {
+        heartbeatManager.start();
+    }
+
+    // 存储运行时并发布事件
+    runtimes.put(spec.getName(), runtime);
+    publishEvent(new NettyClientConnectedEvent(this, spec.getName(), spec.getHost(), spec.getPort()));
+}
+----
+
+== 核心类：ClientPipelineAssembler
+
+`ClientPipelineAssembler` 使用帧编解码器、消息编解码器和响应处理器构建客户端 Pipeline。
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/ClientPipelineAssembler.java
+----
+
+=== 类定义
+
+[source,java]
+----
+public class ClientPipelineAssembler {
+
+    private final ClientProfileRegistry profileRegistry;
+    private final CodecRegistry codecRegistry;
+
+    public ClientPipelineAssembler(ClientProfileRegistry profileRegistry,
+                                    CodecRegistry codecRegistry) {
+        this.profileRegistry = profileRegistry;
+        this.codecRegistry = codecRegistry;
+    }
+}
+----
+
+=== assemble() 方法
 
 [source,java]
 ----
 public void assemble(ChannelPipeline pipeline, ClientSpec clientSpec,
                      RequestInvoker requestInvoker) {
-    // Step 1: 应用 Profile
-    ClientProfile profile = profileRegistry.getProfile(profileName);
-    profile.configure(pipeline, clientSpec);
+    String profileName = clientSpec.getProfile();
 
-    // Step 2: 添加空闲处理器
+    // ========== 步骤 1：获取并应用 Profile ==========
+    ClientProfile profile = profileRegistry.getProfile(profileName);
+    if (profile == null) {
+        throw new IllegalStateException("Unknown client profile: " + profileName);
+    }
+    profile.configure(pipeline, clientSpec);  // 添加帧编解码器
+
+    // ========== 步骤 2：如果配置则添加空闲处理器 ==========
     addIdleHandler(pipeline, clientSpec);
 
-    // Step 3: 添加编解码处理器
+    // ========== 步骤 3：添加编解码处理器 ==========
     addCodecHandler(pipeline, profile);
 
-    // Step 4: 添加响应处理器
+    // ========== 步骤 4：添加响应处理器 ==========
     pipeline.addLast("responseHandler",
             new ClientResponseHandler(requestInvoker, clientSpec.getName()));
+
+    logger.debug("Assembled client pipeline for [{}] with profile [{}]",
+            clientSpec.getName(), profileName);
 }
 ----
 
-== 最终 Pipeline 结构
+=== 空闲处理器配置
+
+[source,java]
+----
+private void addIdleHandler(ChannelPipeline pipeline, ClientSpec clientSpec) {
+    IdleSpec idleSpec = clientSpec.getFeatures().getIdle();
+    if (idleSpec != null && idleSpec.isEnabled()) {
+        pipeline.addLast("idleStateHandler", new IdleStateHandler(
+                idleSpec.getReadSeconds(),
+                idleSpec.getWriteSeconds(),
+                idleSpec.getAllSeconds(),
+                TimeUnit.SECONDS
+        ));
+    }
+}
+----
+
+=== 编解码处理器配置
+
+[source,java]
+----
+private void addCodecHandler(ChannelPipeline pipeline, ClientProfile profile) {
+    String codecName = profile.getDefaultCodec();
+    NettyCodec codec = codecRegistry.getCodec(codecName);
+
+    if (codec == null) {
+        // 回退到 JSON 编解码器
+        codec = new JsonNettyCodec();
+    }
+
+    pipeline.addLast("codecHandler", new JsonCodecHandler(codec));
+}
+----
+
+== Pipeline 组装流程
 
 [source,text]
 ----
-客户端 Pipeline (tcp-lengthfield-json + idle):
-┌─────────────────────────────────────────────────────────────────────┐
-│  出站 ←────────────────────────────────────────────────── 入站     │
-│                                                                      │
-│  [1] frameDecoder         (LengthFieldBasedFrameDecoder)  ← 入站    │
-│  [2] frameEncoder         (LengthFieldPrepender)          → 出站    │
-│  [3] idleStateHandler     (IdleStateHandler)              ↔ 双向    │
-│  [4] codecHandler         (JsonCodecHandler)              ↔ 双向    │
-│  [5] responseHandler      (ClientResponseHandler)         ← 入站    │
-└─────────────────────────────────────────────────────────────────────┘
+                     assemble(pipeline, clientSpec, requestInvoker)
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 1：应用 ClientProfile                                                       │
+    │                                                                                  │
+    │  ClientProfile profile = profileRegistry.getProfile(profileName);               │
+    │  profile.configure(pipeline, clientSpec);                                       │
+    │                                                                                  │
+    │  对于 tcp-lengthfield-json：                                                      │
+    │  ┌──────────────────────────────────────────────────────────────────┐           │
+    │  │  pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(...))     │
+    │  │  pipeline.addLast("frameEncoder", new LengthFieldPrepender(4))               │
+    │  └──────────────────────────────────────────────────────────────────┘           │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 2：添加 IdleStateHandler（如果启用）                                          │
+    │                                                                                  │
+    │  if (idleSpec != null && idleSpec.isEnabled()) {                                │
+    │      pipeline.addLast("idleStateHandler", new IdleStateHandler(                 │
+    │          idleSpec.getReadSeconds(),                                              │
+    │          idleSpec.getWriteSeconds(),                                             │
+    │          idleSpec.getAllSeconds(),                                               │
+    │          TimeUnit.SECONDS                                                        │
+    │      ));                                                                          │
+    │  }                                                                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 3：添加 CodecHandler                                                        │
+    │                                                                                  │
+    │  NettyCodec codec = codecRegistry.getCodec(profile.getDefaultCodec());          │
+    │  pipeline.addLast("codecHandler", new JsonCodecHandler(codec));                 │
+    │                                                                                  │
+    │  JsonCodecHandler 职责：                                                          │
+    │    - 入站：ByteBuf → Map<String, Object>（JSON 反序列化）                          │
+    │    - 出站：Object → ByteBuf（JSON 序列化）                                         │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 4：添加 ClientResponseHandler                                               │
+    │                                                                                  │
+    │  pipeline.addLast("responseHandler",                                            │
+    │      new ClientResponseHandler(requestInvoker, clientSpec.getName()));          │
+    │                                                                                  │
+    │  ClientResponseHandler 职责：                                                     │
+    │    - 通过 correlationId 匹配响应与待处理请求                                        │
+    │    - 处理推送消息（没有 correlationId 的消息）                                      │
+    │    - 连接状态日志（channelActive、channelInactive）                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
 ----
 
-== 数据流
+== ClientProfile 接口
+
+`ClientProfile` 接口定义客户端的协议栈配置：
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/ClientProfile.java
+----
+
+=== 接口定义
+
+[source,java]
+----
+public interface ClientProfile {
+
+    /**
+     * 返回此 Profile 的唯一名称。
+     */
+    String getName();
+
+    /**
+     * 根据此 Profile 配置 Channel Pipeline。
+     */
+    void configure(ChannelPipeline pipeline, ClientSpec clientSpec);
+
+    /**
+     * 返回此 Profile 的默认编解码器类型。
+     */
+    default String getDefaultCodec() {
+        return "json";
+    }
+}
+----
+
+=== 实现示例：TcpLengthFieldJsonClientProfile
+
+[source,java]
+----
+public class TcpLengthFieldJsonClientProfile implements ClientProfile {
+
+    public static final String NAME = "tcp-lengthfield-json";
+
+    private static final int MAX_FRAME_LENGTH = 1024 * 1024;  // 1MB
+    private static final int LENGTH_FIELD_OFFSET = 0;
+    private static final int LENGTH_FIELD_LENGTH = 4;          // 4 字节长度前缀
+    private static final int LENGTH_ADJUSTMENT = 0;
+    private static final int INITIAL_BYTES_TO_STRIP = 4;       // 剥离长度字段
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        // 帧解码器 - 读取长度前缀并提取帧
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
+                MAX_FRAME_LENGTH,
+                LENGTH_FIELD_OFFSET,
+                LENGTH_FIELD_LENGTH,
+                LENGTH_ADJUSTMENT,
+                INITIAL_BYTES_TO_STRIP
+        ));
+
+        // 帧编码器 - 为出站消息添加长度前缀
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(LENGTH_FIELD_LENGTH));
+    }
+}
+----
+
+== ClientResponseHandler
+
+`ClientResponseHandler` 处理服务器响应并将其路由到待处理请求：
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/ClientResponseHandler.java
+----
+
+=== 实现
+
+[source,java]
+----
+public class ClientResponseHandler extends SimpleChannelInboundHandler<Map<String, Object>> {
+
+    private final RequestInvoker requestInvoker;
+    private final String clientName;
+
+    public ClientResponseHandler(RequestInvoker requestInvoker, String clientName) {
+        this.requestInvoker = requestInvoker;
+        this.clientName = clientName;
+    }
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, Map<String, Object> response) {
+        // 从响应中提取关联 ID
+        String correlationId = (String) response.get(RequestInvoker.CORRELATION_ID_HEADER);
+
+        if (correlationId != null) {
+            // 匹配响应与待处理请求
+            boolean completed = requestInvoker.completeRequest(correlationId, response);
+            if (!completed) {
+                logger.debug("Received response without pending request: correlationId={}",
+                        correlationId);
+            }
+        } else {
+            // 没有关联 ID 的响应 - 可能是推送消息
+            logger.debug("Received message without correlationId from server");
+            handlePushMessage(ctx, response);
+        }
+    }
+
+    /**
+     * 处理推送消息（没有关联 ID 的消息）。
+     * 子类可以重写以处理推送消息。
+     */
+    protected void handlePushMessage(ChannelHandlerContext ctx, Map<String, Object> message) {
+        String messageType = (String) message.get(RequestInvoker.MESSAGE_TYPE_HEADER);
+        logger.debug("Push message received: type={}, client={}", messageType, clientName);
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        logger.info("Client [{}] connected to server: {}", clientName, ctx.channel().remoteAddress());
+        super.channelActive(ctx);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        logger.info("Client [{}] disconnected from server: {}", clientName, ctx.channel().remoteAddress());
+        super.channelInactive(ctx);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        logger.error("Client [{}] error: {}", clientName, cause.getMessage(), cause);
+        ctx.close();
+    }
+}
+----
+
+== 最终客户端 Pipeline 结构
 
 [source,text]
 ----
-出站 (发送请求):
-  Java Object → codecHandler (JSON序列化) → frameEncoder (添加长度) → 网络
-
-入站 (接收响应):
-  网络 → frameDecoder (解析帧) → codecHandler (反序列化) → responseHandler (匹配请求)
+客户端 Pipeline（tcp-lengthfield-json + 启用空闲检测）：
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  出站 ←────────────────────────────────────────────────────────── 入站              │
+│                                                                                      │
+│  [1] frameDecoder         (LengthFieldBasedFrameDecoder)  ← 入站：解析帧             │
+│  [2] frameEncoder         (LengthFieldPrepender)          → 出站：添加长度           │
+│  [3] idleStateHandler     (IdleStateHandler)              ↔ 双向：空闲检测           │
+│  [4] codecHandler         (JsonCodecHandler)              ↔ 双向：JSON 编解码        │
+│  [5] responseHandler      (ClientResponseHandler)         ← 入站：处理响应           │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ----
 
-== 与服务端对比
+=== 数据流
+
+[source,text]
+----
+出站（发送请求）：
+  Java Object → codecHandler（序列化为 JSON）→ frameEncoder（添加长度）→ 网络
+
+入站（接收响应）：
+  网络 → frameDecoder（解析帧）→ codecHandler（反序列化）→ responseHandler（匹配请求）
+----
+
+== 与服务端 Pipeline 对比
 
 [cols="2,3,3"]
 |===
-|特性 |服务端 |客户端
+|特性 |服务端（PipelineAssembler）|客户端（ClientPipelineAssembler）
 
-|Feature 支持
-|多种 (SSL, RateLimit, ConnectionLimit, Logging, Idle)
-|仅 Idle
+|**Feature 支持**
+|多种 Feature（SSL、RateLimit、ConnectionLimit、Logging、Idle）
+|仅支持 Idle
 
-|自定义配置器
-|支持 NettyPipelineConfigurer
+|**自定义配置器**
+|支持 `NettyPipelineConfigurer`
 |不支持
 
-|消息处理器
+|**Profile**
+|多种（TCP、HTTP、WebSocket、UDP）
+|仅 TCP
+
+|**消息处理器**
 |DispatcherHandler + ExceptionHandler
 |ClientResponseHandler
+
+|**可扩展性**
+|高（Feature + 配置器）
+|低
 |===
+
+== 扩展客户端 Pipeline
+
+由于框架没有为客户端 Pipeline 提供内置扩展点（不像服务端有 `NettyPipelineConfigurer`），您有以下选项：
+
+=== 选项 1：自定义 ClientProfile
+
+创建一个添加您自己处理器的自定义 Profile：
+
+[source,java]
+----
+@Component
+public class CustomClientProfile implements ClientProfile {
+
+    public static final String NAME = "custom-tcp-json";
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        // 标准帧编解码器
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
+                1024 * 1024, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(4));
+
+        // 自定义处理器
+        pipeline.addLast("loggingHandler", new LoggingHandler(LogLevel.DEBUG));
+        pipeline.addLast("myCustomHandler", new MyCustomHandler());
+    }
+}
+----
+
+然后在配置中使用：
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: my-client
+        profile: custom-tcp-json   # 使用自定义 Profile
+        host: 127.0.0.1
+        port: 9000
+----
+
+=== 选项 2：扩展 ClientPipelineAssembler
+
+创建一个添加自定义处理器的子类：
+
+[source,java]
+----
+@Component
+@Primary
+public class CustomClientPipelineAssembler extends ClientPipelineAssembler {
+
+    public CustomClientPipelineAssembler(ClientProfileRegistry profileRegistry,
+                                          CodecRegistry codecRegistry) {
+        super(profileRegistry, codecRegistry);
+    }
+
+    @Override
+    public void assemble(ChannelPipeline pipeline, ClientSpec clientSpec,
+                         RequestInvoker requestInvoker) {
+        // 调用父类方法
+        super.assemble(pipeline, clientSpec, requestInvoker);
+
+        // 添加自定义处理器
+        if (shouldAddMetrics(clientSpec)) {
+            pipeline.addBefore("responseHandler", "metricsHandler",
+                    new ClientMetricsHandler(clientSpec.getName()));
+        }
+    }
+
+    private boolean shouldAddMetrics(ClientSpec clientSpec) {
+        // 自定义逻辑决定是否添加指标
+        return "production-client".equals(clientSpec.getName());
+    }
+}
+----
+
+=== 选项 3：扩展 ClientResponseHandler
+
+用于自定义响应处理逻辑：
+
+[source,java]
+----
+public class CustomResponseHandler extends ClientResponseHandler {
+
+    private final PushMessageListener pushListener;
+
+    public CustomResponseHandler(RequestInvoker requestInvoker, String clientName,
+                                  PushMessageListener pushListener) {
+        super(requestInvoker, clientName);
+        this.pushListener = pushListener;
+    }
+
+    @Override
+    protected void handlePushMessage(ChannelHandlerContext ctx, Map<String, Object> message) {
+        // 自定义推送消息处理
+        String messageType = (String) message.get("type");
+        pushListener.onPushMessage(messageType, message);
+    }
+}
+----
+
+== 客户端调用链
+
+[source,text]
+----
+@NettyClient 接口调用
+       │
+       ▼
+ClientProxyFactory.createProxy()
+       │
+       ▼
+ClientInvocationHandler.invoke()
+       │
+       ▼
+RequestInvoker.invoke()
+       │
+       ▼
+ConnectionPool.acquire()  ──► 获取/创建连接
+       │
+       ▼
+Bootstrap.connect()  ──► 触发 ChannelInitializer.initChannel()
+       │
+       ▼
+ClientPipelineAssembler.assemble()
+       │
+       ├── ClientProfile.configure()         [帧编解码器]
+       ├── addIdleHandler()                  [空闲检测]
+       ├── addCodecHandler()                 [JSON 编解码]
+       └── ClientResponseHandler             [响应处理]
+----
+
+== 总结
+
+客户端 Pipeline 组装比服务端更简单：
+
+1. **Profile** - 帧编码/解码（4 字节长度前缀）
+2. **Idle Handler** - 可选的空闲连接检测
+3. **Codec Handler** - JSON 序列化/反序列化
+4. **Response Handler** - 请求/响应关联
+
+与服务端的主要区别：
+
+* 没有 Feature 系统（仅支持 Idle）
+* 没有自定义配置器支持
+* 更简单的 Pipeline 结构
+* 单一协议支持（仅 TCP）
+
+如需高级定制，可以扩展 `ClientProfile` 或 `ClientPipelineAssembler`。

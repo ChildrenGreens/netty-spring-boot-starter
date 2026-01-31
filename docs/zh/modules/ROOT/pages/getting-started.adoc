@@ -1,17 +1,27 @@
 = 快速开始
 :page-pagination:
 
-本指南帮助你在 5 分钟内创建一个 Netty 服务端和客户端应用。
+本指南将引导你使用 Spring Boot 创建你的第一个 Netty 服务器和客户端。
 
-== 前置要求
+== 前置条件
 
-* Java 17+
+* 已安装 JDK {java-version} 或更高版本
 * Maven 3.6+ 或 Gradle 7+
-* Spring Boot 3.x
+* 你喜欢的 IDE（IntelliJ IDEA、Eclipse、VS Code）
 
-== 步骤 1: 添加依赖
+== 步骤 1：创建 Spring Boot 项目
 
-[source,xml]
+使用 https://start.spring.io/[Spring Initializr] 或你的 IDE 创建一个新的 Spring Boot 项目。选择：
+
+* Java {java-version}
+* Spring Boot {spring-boot-version}
+* 打包方式：Jar
+
+== 步骤 2：添加依赖
+
+将 starter 依赖添加到你的 `pom.xml`：
+
+[source,xml,subs="attributes+"]
 ----
 <dependency>
     <groupId>com.childrengreens</groupId>
@@ -20,60 +30,306 @@
 </dependency>
 ----
 
-== 步骤 2: 配置服务端
+或者对于 Gradle（`build.gradle`）：
+
+[source,groovy,subs="attributes+"]
+----
+implementation 'com.childrengreens:netty-spring-boot-starter:{project-version}'
+----
+
+== 步骤 3：配置服务器
+
+创建或编辑 `src/main/resources/application.yml`：
+
+[source,yaml]
+----
+spring:
+  netty:
+    enabled: true
+    servers:
+      - name: my-tcp-server          # <1>
+        transport: TCP               # <2>
+        host: 0.0.0.0                # <3>
+        port: 9000                   # <4>
+        profile: tcp-lengthfield-json  # <5>
+        routing:
+          mode: MESSAGE_TYPE         # <6>
+----
+<1> 此服务器实例的唯一名称
+<2> 传输协议：`TCP`、`HTTP` 或 `UDP`
+<3> 绑定地址（`0.0.0.0` = 所有网络接口）
+<4> 监听的端口号
+<5> 定义帧分割和编解码的协议 Profile
+<6> 消息路由方式：`MESSAGE_TYPE` 从 JSON 字段中提取类型
+
+== 步骤 4：创建消息处理器
+
+创建一个处理器类来处理传入的消息：
+
+[source,java]
+----
+package com.example.demo.handler;
+
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageController;
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageMapping;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+
+import java.util.Map;
+
+@NettyMessageController  // <1>
+public class MessageHandler {
+
+    @NettyMessageMapping("ping")  // <2>
+    public Map<String, Object> handlePing(NettyContext context) {  // <3>
+        return Map.of(
+            "type", "pong",
+            "timestamp", System.currentTimeMillis(),
+            "channelId", context.getChannelId()
+        );
+    }
+
+    @NettyMessageMapping("echo")
+    public Map<String, Object> handleEcho(Map<String, Object> request, NettyContext context) {  // <4>
+        return Map.of(
+            "type", "echo.response",
+            "data", request.get("data"),
+            "serverTime", System.currentTimeMillis()
+        );
+    }
+}
+----
+<1> 将此类标记为 Netty 消息处理器（类似于 Spring MVC 中的 `@RestController`）
+<2> 将 `"type": "ping"` 的消息路由到此方法
+<3> `NettyContext` 提供对 Channel 信息的访问
+<4> 请求载荷自动从 JSON 反序列化
+
+== 步骤 5：运行应用
+
+启动你的 Spring Boot 应用：
+
+[source,bash]
+----
+mvn spring-boot:run
+----
+
+你应该在日志中看到：
+
+[source,text]
+----
+INFO  c.c.n.s.b.c.server.NettyServerOrchestrator : Starting Netty server [my-tcp-server] on 0.0.0.0:9000
+INFO  c.c.n.s.b.c.server.NettyServerOrchestrator : Netty server [my-tcp-server] started successfully
+----
+
+== 步骤 6：测试服务器
+
+=== 使用 netcat (nc)
+
+`tcp-lengthfield-json` profile 期望消息带有 4 字节长度前缀。对于简单测试，你可以使用 TCP 客户端或编写测试类。
+
+=== 使用 Java 测试客户端
+
+创建一个简单的测试客户端：
+
+[source,java]
+----
+package com.example.demo;
+
+import java.io.*;
+import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+
+public class TestClient {
+    public static void main(String[] args) throws Exception {
+        try (Socket socket = new Socket("localhost", 9000)) {
+            OutputStream out = socket.getOutputStream();
+            InputStream in = socket.getInputStream();
+
+            // 准备消息
+            String message = "{\"type\":\"ping\"}";
+            byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+            // 发送：4 字节长度前缀 + 消息
+            ByteBuffer buffer = ByteBuffer.allocate(4 + messageBytes.length);
+            buffer.putInt(messageBytes.length);
+            buffer.put(messageBytes);
+            out.write(buffer.array());
+            out.flush();
+
+            // 读取响应：4 字节长度前缀
+            byte[] lengthBytes = new byte[4];
+            in.read(lengthBytes);
+            int length = ByteBuffer.wrap(lengthBytes).getInt();
+
+            // 读取响应体
+            byte[] responseBytes = new byte[length];
+            in.read(responseBytes);
+            String response = new String(responseBytes, StandardCharsets.UTF_8);
+
+            System.out.println("Response: " + response);
+            // 输出: Response: {"type":"pong","timestamp":1706012345678,"channelId":"..."}
+        }
+    }
+}
+----
+
+== 完整示例项目结构
+
+[source,text]
+----
+my-netty-app/
+├── pom.xml
+└── src/main/
+    ├── java/com/example/demo/
+    │   ├── DemoApplication.java
+    │   └── handler/
+    │       └── MessageHandler.java
+    └── resources/
+        └── application.yml
+----
+
+=== DemoApplication.java
+
+[source,java]
+----
+package com.example.demo;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class DemoApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DemoApplication.class, args);
+    }
+}
+----
+
+== 添加 HTTP 服务器
+
+你可以同时运行多个服务器。将 HTTP 服务器添加到你的配置中：
 
 [source,yaml]
 ----
 spring:
   netty:
     servers:
-      - name: my-server
+      - name: my-tcp-server
         transport: TCP
         port: 9000
         profile: tcp-lengthfield-json
         routing:
           mode: MESSAGE_TYPE
-----
 
-== 步骤 3: 创建消息处理器
+      - name: my-http-server    # <1>
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH            # <2>
+----
+<1> 第二个服务器，使用不同的名称和端口
+<2> HTTP 使用基于路径的路由
+
+创建 HTTP 控制器：
 
 [source,java]
 ----
-@NettyMessageController
-public class MessageHandler {
+package com.example.demo.handler;
 
-    @NettyMessageMapping("ping")
-    public Map<String, Object> handlePing() {
-        return Map.of("type", "pong", "time", System.currentTimeMillis());
+import com.childrengreens.netty.spring.boot.context.annotation.*;
+import java.util.Map;
+
+@NettyController(path = "/api")  // <1>
+public class HttpController {
+
+    @NettyHttpGet("/health")  // <2>
+    public Map<String, Object> health() {
+        return Map.of("status", "UP");
+    }
+
+    @NettyHttpGet("/users/{id}")  // <3>
+    public Map<String, Object> getUser(@PathVar("id") Long id) {
+        return Map.of("id", id, "name", "User " + id);
+    }
+
+    @NettyHttpPost("/users")
+    public Map<String, Object> createUser(@Body Map<String, Object> user) {  // <4>
+        return Map.of("id", 1, "name", user.get("name"), "created", true);
     }
 }
 ----
+<1> 此控制器中所有端点的基础路径
+<2> 映射到 `GET /api/health`
+<3> 使用 `@PathVar` 提取路径变量
+<4> 使用 `@Body` 解析请求体
 
-== 步骤 4: 启动应用
-
-[source,java]
-----
-@SpringBootApplication
-@EnableNettyServers
-public class Application {
-    public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
-    }
-}
-----
-
-== 步骤 5: 测试
-
-使用 `telnet` 或编写客户端测试：
+使用 curl 测试：
 
 [source,bash]
 ----
-# 发送 JSON 消息 (需要 4 字节长度前缀)
-echo -ne '\x00\x00\x00\x0f{"type":"ping"}' | nc localhost 9000
+# 健康检查
+curl http://localhost:8080/api/health
+# {"status":"UP"}
+
+# 获取用户
+curl http://localhost:8080/api/users/123
+# {"id":123,"name":"User 123"}
+
+# 创建用户
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"name":"John"}' \
+     http://localhost:8080/api/users
+# {"id":1,"name":"John","created":true}
 ----
 
 == 下一步
 
-* xref:configuration.adoc[配置] - 完整配置选项
-* xref:server/handlers.adoc[处理器] - 处理器详解
-* xref:client/usage.adoc[客户端] - 声明式客户端
+现在你已经有一个基本的服务器在运行：
+
+* xref:configuration.adoc[配置参考] - 了解所有配置选项
+* xref:server/handlers.adoc[处理器] - 深入了解处理器类型和参数绑定
+* xref:server/profiles.adoc[Profiles] - 理解协议 Profile
+* xref:server/features.adoc[特性] - 添加 SSL、限流、空闲检测
+* xref:client/usage.adoc[客户端使用] - 创建声明式 Netty 客户端
+
+== 故障排除
+
+=== 端口已被占用
+
+[source,text]
+----
+java.net.BindException: Address already in use
+----
+
+在 `application.yml` 中更改端口，或停止使用该端口的进程：
+
+[source,bash]
+----
+# 查找使用端口 9000 的进程
+lsof -i :9000
+# 终止该进程
+kill -9 <PID>
+----
+
+=== 找不到路由的处理器
+
+[source,text]
+----
+WARN  No handler found for route: unknown (server=my-tcp-server)
+----
+
+这意味着你的 JSON 消息中的 `type` 字段与任何 `@NettyMessageMapping` 都不匹配。检查：
+
+* 消息包含 `type` 字段：`{"type":"ping"}`
+* 拼写完全匹配（区分大小写）
+* 处理器类使用 `@NettyMessageController` 注解
+* 处理器类位于 Spring Boot 扫描的包中
+
+=== 处理器方法未被调用
+
+确保你的处理器类：
+
+* 使用 `@NettyMessageController` 或 `@NettyController` 注解
+* 位于主应用程序类的子包中
+* 是一个 Spring Bean（组件扫描正常工作）

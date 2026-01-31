@@ -1,9 +1,17 @@
-= 协议配置
+= Profiles (协议配置)
 :page-pagination:
 
-协议配置 (Profile) 定义服务器的完整协议栈，包括消息帧、编解码和协议特定处理器。
+Profile 定义服务器的完整协议栈，包括消息帧、编解码和协议特定处理器。本页介绍内置的 Profile 以及如何创建自定义 Profile。
 
-== 内置协议配置
+== 什么是 Profile？
+
+Profile 配置 Netty 的 `ChannelPipeline`，为特定协议添加适当的处理器。它负责：
+
+* **消息帧** - 如何确定消息边界（长度前缀、分隔符等）
+* **编解码器** - 如何序列化/反序列化消息（JSON、Protobuf 等）
+* **协议处理器** - 协议特定的处理器（HTTP 编解码器、WebSocket 握手等）
+
+== 内置 Profile
 
 [cols="2,1,1,3"]
 |===
@@ -17,7 +25,7 @@
 |`tcp-line`
 |TCP
 |文本
-|行分隔帧 (换行符)
+|行分隔帧（换行符分隔）
 
 |`tcp-raw`
 |TCP
@@ -42,19 +50,32 @@
 
 == TCP Length-Field JSON Profile
 
-最常用的 TCP RPC 和消息传递配置。
+**Profile 名称：** `tcp-lengthfield-json`
+
+这是最常用的 TCP RPC 和消息传递 Profile。
 
 === 线格式
 
 [source,text]
 ----
 +----------------+------------------+
-| 长度 (4B)      |   JSON 消息体    |
+| Length (4B)    |   JSON Body      |
 | 大端序整数     |   UTF-8 字节     |
 +----------------+------------------+
 |<-- 4 字节 --->|<-- N 字节 ----->|
 
 总帧大小 = 4 + N 字节
+----
+
+=== 消息示例
+
+发送 `{"type":"ping"}`：
+
+[source,text]
+----
+Bytes: 00 00 00 0F 7B 22 74 79 70 65 22 3A 22 70 69 6E 67 22 7D
+       |---------|  |------------------------------------------|
+       Length=15    JSON: {"type":"ping"}
 ----
 
 === 配置
@@ -68,14 +89,323 @@ spring:
         transport: TCP
         port: 9000
         profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
 ----
 
-== 自定义协议配置
+=== Pipeline 结构
 
-实现 `Profile` 接口创建自定义协议配置：
+[source,text]
+----
+ChannelPipeline:
+├── LengthFieldBasedFrameDecoder  (入站：提取帧)
+├── LengthFieldPrepender          (出站：添加长度前缀)
+├── DispatcherHandler             (路由到处理器)
+└── ExceptionHandler              (错误处理)
+----
+
+=== Java 客户端示例
 
 [source,java]
 ----
+public class TcpClient {
+    public static void main(String[] args) throws Exception {
+        try (Socket socket = new Socket("localhost", 9000);
+             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+             DataInputStream in = new DataInputStream(socket.getInputStream())) {
+
+            // 发送消息
+            byte[] message = "{\"type\":\"ping\"}".getBytes(StandardCharsets.UTF_8);
+            out.writeInt(message.length);  // 4 字节长度前缀（大端序）
+            out.write(message);
+            out.flush();
+
+            // 读取响应
+            int length = in.readInt();
+            byte[] response = new byte[length];
+            in.readFully(response);
+            System.out.println(new String(response, StandardCharsets.UTF_8));
+        }
+    }
+}
+----
+
+== TCP Line Profile
+
+**Profile 名称：** `tcp-line`
+
+使用换行符作为消息分隔符的文本协议。适用于 telnet 风格的协议或调试。
+
+=== 线格式
+
+[source,text]
+----
+Message 1\r\n
+Message 2\r\n
+Message 3\r\n
+----
+
+每条消息以 `\r\n`（CRLF）或 `\n`（LF）结尾。
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: line-server
+        transport: TCP
+        port: 9001
+        profile: tcp-line
+        routing:
+          mode: MESSAGE_TYPE
+----
+
+=== 使用 Telnet 测试
+
+[source,bash]
+----
+$ telnet localhost 9001
+Trying 127.0.0.1...
+Connected to localhost.
+{"type":"ping"}
+{"type":"pong","timestamp":1706012345678}
+----
+
+== TCP Raw Profile
+
+**Profile 名称：** `tcp-raw`
+
+无帧处理 - 接收原始字节。当你需要完全控制协议时使用此 Profile。
+
+WARNING: 没有帧处理时，你必须在处理器中自行处理消息边界。
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: raw-server
+        transport: TCP
+        port: 9002
+        profile: tcp-raw
+----
+
+=== 原始字节处理器
+
+[source,java]
+----
+@NettyMessageController
+public class RawHandler {
+
+    @NettyMessageMapping("unknown")  // 捕获所有原始消息
+    public byte[] handleRaw(byte[] data, NettyContext context) {
+        // 处理原始字节
+        return processBytes(data);
+    }
+}
+----
+
+== HTTP/1.1 JSON Profile
+
+**Profile 名称：** `http1-json`
+
+标准 HTTP/1.1 协议，使用 JSON 请求/响应体。
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: http-server
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH
+----
+
+=== Pipeline 结构
+
+[source,text]
+----
+ChannelPipeline:
+├── HttpServerCodec          (HTTP 编解码)
+├── HttpObjectAggregator     (组合 HTTP 消息部分)
+├── DispatcherHandler        (路由到控制器)
+└── ExceptionHandler         (返回 HTTP 错误响应)
+----
+
+=== 请求/响应格式
+
+请求：
+[source,http]
+----
+POST /api/users HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{"name":"John","email":"john@example.com"}
+----
+
+响应：
+[source,http]
+----
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 45
+
+{"id":1,"name":"John","email":"john@example.com"}
+----
+
+== WebSocket Profile
+
+**Profile 名称：** `websocket`
+
+WebSocket 协议，用于实时双向通信。
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: ws-server
+        transport: HTTP        # WebSocket 以 HTTP 开始
+        port: 8081
+        profile: websocket
+        routing:
+          mode: WS_PATH
+----
+
+=== 连接流程
+
+[source,text]
+----
+1. HTTP 升级请求
+   GET /ws/chat HTTP/1.1
+   Upgrade: websocket
+   Connection: Upgrade
+   Sec-WebSocket-Key: ...
+   Sec-WebSocket-Version: 13
+
+2. HTTP 升级响应
+   HTTP/1.1 101 Switching Protocols
+   Upgrade: websocket
+   Connection: Upgrade
+   Sec-WebSocket-Accept: ...
+
+3. WebSocket 帧
+   ← Text Frame: {"text":"Hello"}
+   → Text Frame: {"text":"Hi there"}
+   ...
+   ← Close Frame
+----
+
+=== Pipeline 结构
+
+[source,text]
+----
+ChannelPipeline:
+├── HttpServerCodec          (初始 HTTP 用于握手)
+├── HttpObjectAggregator     (聚合握手请求)
+├── WebSocketServerProtocolHandler (握手 + 帧处理)
+├── DispatcherHandler        (路由 WS 事件)
+└── ExceptionHandler         (错误时发送关闭帧)
+----
+
+== UDP JSON Profile
+
+**Profile 名称：** `udp-json`
+
+UDP 数据报，使用 JSON 负载。每个数据报是一条完整的消息。
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: udp-server
+        transport: UDP
+        port: 7000
+        profile: udp-json
+        routing:
+          mode: MESSAGE_TYPE
+----
+
+=== 特性
+
+* 无需建立连接
+* 不保证送达
+* 不保证顺序
+* 每个数据报独立
+* 最大大小有限（通常 65535 字节，但建议小于 1500 以适应网络 MTU）
+
+=== 使用 netcat 测试
+
+[source,bash]
+----
+# 发送 UDP 消息
+echo '{"type":"ping"}' | nc -u localhost 7000
+----
+
+== 自定义 Profile
+
+通过实现 `Profile` 接口创建自定义 Profile。
+
+=== Profile 接口
+
+[source,java]
+----
+public interface Profile {
+    /**
+     * 用于配置的唯一 Profile 名称。
+     */
+    String getName();
+
+    /**
+     * 配置 Channel Pipeline。
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * 返回用于错误处理的协议类型。
+     */
+    default String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
+
+    /**
+     * 此 Profile 是否支持 dispatcher handler。
+     */
+    default boolean supportsDispatcher() {
+        return true;
+    }
+}
+----
+
+=== 示例：Protobuf Profile
+
+[source,java]
+----
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+import com.childrengreens.netty.spring.boot.context.profile.Profile;
+import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.codec.protobuf.ProtobufDecoder;
+import io.netty.handler.codec.protobuf.ProtobufEncoder;
+import org.springframework.stereotype.Component;
+
 @Component
 public class ProtobufProfile implements Profile {
 
@@ -86,7 +416,7 @@ public class ProtobufProfile implements Profile {
 
     @Override
     public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        // 帧编解码器
+        // 帧解码器：4 字节长度前缀
         pipeline.addLast("frameDecoder",
             new LengthFieldBasedFrameDecoder(1048576, 0, 4, 0, 4));
         pipeline.addLast("frameEncoder",
@@ -98,5 +428,82 @@ public class ProtobufProfile implements Profile {
         pipeline.addLast("protobufEncoder",
             new ProtobufEncoder());
     }
+
+    @Override
+    public String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
 }
 ----
+
+用法：
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: protobuf-server
+        transport: TCP
+        port: 9000
+        profile: tcp-lengthfield-protobuf
+----
+
+=== 示例：自定义分隔符 Profile
+
+[source,java]
+----
+@Component
+public class PipeDelimitedProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "tcp-pipe-delimited";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 使用管道符作为分隔符
+        pipeline.addLast("frameDecoder",
+            new DelimiterBasedFrameDecoder(8192,
+                Unpooled.wrappedBuffer(new byte[]{'|'})));
+        pipeline.addLast("stringDecoder",
+            new StringDecoder(StandardCharsets.UTF_8));
+        pipeline.addLast("stringEncoder",
+            new StringEncoder(StandardCharsets.UTF_8));
+    }
+}
+----
+
+== Profile 选择指南
+
+[cols="2,4"]
+|===
+|使用场景 |推荐 Profile
+
+|高性能 RPC
+|`tcp-lengthfield-json`
+
+|游戏服务器
+|`tcp-lengthfield-json` 或自定义二进制
+
+|调试/测试
+|`tcp-line`
+
+|REST API
+|`http1-json`
+
+|实时聊天
+|`websocket`
+
+|实时通知
+|`websocket`
+
+|指标收集
+|`udp-json`
+
+|日志采集
+|`udp-json` 或 `tcp-line`
+
+|遗留系统集成
+|自定义 Profile
+|===

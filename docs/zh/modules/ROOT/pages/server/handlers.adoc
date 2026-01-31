@@ -1,7 +1,7 @@
 = 处理器
 :page-pagination:
 
-处理器是应用逻辑的核心。本页介绍所有处理器类型、注解和参数绑定选项。
+处理器是应用逻辑的核心。本页涵盖所有处理器类型、注解和参数绑定选项。
 
 == 处理器类型概览
 
@@ -19,25 +19,33 @@
 
 |WebSocket 处理器
 |`@NettyController`
-|WebSocket 事件 (连接、消息、关闭)
+|WebSocket 事件（连接、消息、关闭）
 |===
 
 == TCP/UDP 消息处理器
 
 === 基本用法
 
+使用 `@NettyMessageController` 创建 TCP 或 UDP 消息的处理器：
+
 [source,java]
 ----
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageController;
+import com.childrengreens.netty.spring.boot.context.annotation.NettyMessageMapping;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+
 @NettyMessageController
 public class GameMessageHandler {
 
     @NettyMessageMapping("player.move")
     public MoveResponse handleMove(MoveRequest request, NettyContext context) {
+        // 处理玩家移动
         return new MoveResponse(request.getPlayerId(), newPosition);
     }
 
     @NettyMessageMapping("player.attack")
     public AttackResponse handleAttack(AttackRequest request) {
+        // 处理攻击动作
         return attackService.processAttack(request);
     }
 }
@@ -45,7 +53,7 @@ public class GameMessageHandler {
 
 === 消息格式
 
-消息是包含 `type` 字段的 JSON 对象，用于路由：
+消息是带有 `type` 字段的 JSON 对象，用于路由：
 
 [source,json]
 ----
@@ -57,14 +65,43 @@ public class GameMessageHandler {
 }
 ----
 
+`type` 字段的值（`player.move`）必须与 `@NettyMessageMapping` 的值完全匹配。
+
+=== 支持的路由键字段
+
+框架按顺序在以下 JSON 字段中查找路由键：
+
+1. `type`
+2. `cmd`
+3. `action`
+4. `command`
+
+[source,json]
+----
+{"type": "ping"}        // 匹配 @NettyMessageMapping("ping")
+{"cmd": "login"}        // 匹配 @NettyMessageMapping("login")
+{"action": "refresh"}   // 匹配 @NettyMessageMapping("refresh")
+----
+
 == HTTP 控制器
+
+=== 基本 HTTP 端点
+
+使用 `@NettyController` 配合 HTTP 方法注解：
 
 [source,java]
 ----
+import com.childrengreens.netty.spring.boot.context.annotation.*;
+
 @NettyController(path = "/api/v1")
 public class UserController {
 
-    @NettyHttpGet("/users/{id}")
+    @NettyHttpGet("/users")
+    public List<User> listUsers() {
+        return userService.findAll();
+    }
+
+    @NettyHttpGet("/users/\{id\}")
     public User getUser(@PathVar("id") Long id) {
         return userService.findById(id);
     }
@@ -73,34 +110,220 @@ public class UserController {
     public User createUser(@Body UserCreateRequest request) {
         return userService.create(request);
     }
+
+    @NettyHttpPut("/users/\{id\}")
+    public User updateUser(@PathVar("id") Long id, @Body UserUpdateRequest request) {
+        return userService.update(id, request);
+    }
+
+    @NettyHttpDelete("/users/\{id\}")
+    public void deleteUser(@PathVar("id") Long id) {
+        userService.delete(id);
+    }
 }
+----
+
+=== HTTP 方法注解
+
+[cols="2,2,3"]
+|===
+|注解 |HTTP 方法 |示例
+
+|`@NettyHttpGet`
+|GET
+|`@NettyHttpGet("/users/\{id\}")`
+
+|`@NettyHttpPost`
+|POST
+|`@NettyHttpPost("/users")`
+
+|`@NettyHttpPut`
+|PUT
+|`@NettyHttpPut("/users/\{id\}")`
+
+|`@NettyHttpDelete`
+|DELETE
+|`@NettyHttpDelete("/users/\{id\}")`
+
+|`@NettyHttpPatch`
+|PATCH
+|`@NettyHttpPatch("/users/\{id\}")`
+|===
+
+=== 路径变量
+
+从 URL 路径中提取值：
+
+[source,java]
+----
+@NettyHttpGet("/orders/{orderId}/items/{itemId}")
+public OrderItem getOrderItem(
+        @PathVar("orderId") Long orderId,
+        @PathVar("itemId") Long itemId) {
+    return orderService.getItem(orderId, itemId);
+}
+----
+
+URL: `GET /orders/123/items/456` → `orderId=123`, `itemId=456`
+
+=== 查询参数
+
+提取 URL 查询参数：
+
+[source,java]
+----
+@NettyHttpGet("/users")
+public Page<User> searchUsers(
+        @Query("name") String name,
+        @Query("page") Integer page,
+        @Query("size") Integer size) {
+    return userService.search(name, page, size);
+}
+----
+
+URL: `GET /users?name=John&page=0&size=10`
+
+=== 请求头
+
+提取 HTTP 头：
+
+[source,java]
+----
+@NettyHttpGet("/protected/resource")
+public Resource getResource(
+        @Header("Authorization") String authToken,
+        @Header("X-Request-ID") String requestId) {
+    // 验证令牌并处理请求
+    return resourceService.get(authToken);
+}
+----
+
+=== 请求体
+
+解析 JSON 请求体：
+
+[source,java]
+----
+@NettyHttpPost("/orders")
+public Order createOrder(@Body OrderRequest request) {
+    return orderService.create(request);
+}
+----
+
+请求：
+[source,bash]
+----
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"productId": 123, "quantity": 2}' \
+     http://localhost:8080/orders
 ----
 
 == WebSocket 处理器
 
+=== WebSocket 事件注解
+
+[cols="2,3"]
+|===
+|注解 |描述
+
+|`@NettyWsOnOpen`
+|WebSocket 连接建立时调用
+
+|`@NettyWsOnText`
+|收到文本消息时调用
+
+|`@NettyWsOnBinary`
+|收到二进制消息时调用
+
+|`@NettyWsOnClose`
+|WebSocket 连接关闭时调用
+
+|`@NettyWsOnError`
+|发生错误时调用
+|===
+
+=== 完整 WebSocket 示例
+
 [source,java]
 ----
+import com.childrengreens.netty.spring.boot.context.annotation.*;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+
 @NettyController(path = "/ws")
 public class ChatWebSocketHandler {
 
+    private final ChatService chatService;
+    private final Map<String, NettyContext> connections = new ConcurrentHashMap<>();
+
     @NettyWsOnOpen("/chat/{roomId}")
-    public void onConnect(@PathVar("roomId") String roomId, NettyContext context) {
-        // 处理连接
+    public void onConnect(
+            @PathVar("roomId") String roomId,
+            @Query("username") String username,
+            NettyContext context) {
+        // 存储连接
+        connections.put(context.getChannelId(), context);
+        chatService.joinRoom(roomId, username, context);
+
+        // 发送欢迎消息
+        context.writeAndFlush(Map.of(
+            "type", "system",
+            "message", "Welcome to room " + roomId
+        ));
     }
 
     @NettyWsOnText("/chat/{roomId}")
-    public void onMessage(String message, @PathVar("roomId") String roomId) {
-        // 处理消息
+    public void onMessage(
+            String message,
+            @PathVar("roomId") String roomId,
+            NettyContext context) {
+        // 广播消息到房间
+        ChatMessage chatMessage = parseMessage(message);
+        chatService.broadcast(roomId, chatMessage);
+    }
+
+    @NettyWsOnBinary("/chat/{roomId}")
+    public byte[] onBinaryMessage(byte[] data, NettyContext context) {
+        // 处理文件上传或二进制数据
+        return processAndAcknowledge(data);
     }
 
     @NettyWsOnClose("/chat/{roomId}")
-    public void onDisconnect(@PathVar("roomId") String roomId, NettyContext context) {
-        // 处理断开
+    public void onDisconnect(
+            @PathVar("roomId") String roomId,
+            NettyContext context) {
+        connections.remove(context.getChannelId());
+        chatService.leaveRoom(roomId, context);
+    }
+
+    @NettyWsOnError("/chat/{roomId}")
+    public void onError(Throwable error, NettyContext context) {
+        log.error("WebSocket error for channel {}", context.getChannelId(), error);
     }
 }
 ----
 
-== 参数注解
+=== WebSocket 客户端连接
+
+[source,javascript]
+----
+// JavaScript 客户端
+const ws = new WebSocket('ws://localhost:8081/ws/chat/room1?username=John');
+
+ws.onopen = () => {
+    console.log('Connected');
+    ws.send(JSON.stringify({ text: 'Hello!' }));
+};
+
+ws.onmessage = (event) => {
+    console.log('Received:', event.data);
+};
+
+ws.onclose = () => {
+    console.log('Disconnected');
+};
+----
+
+== 参数注解参考
 
 [cols="2,1,4"]
 |===
@@ -108,44 +331,242 @@ public class ChatWebSocketHandler {
 
 |`@PathVar("name")`
 |否
-|从 URL 提取路径变量
+|从 URL 提取路径变量。类型转换是自动的。
 
 |`@Query("name")`
 |否
-|提取查询参数
+|提取查询参数。如果不存在则返回 `null`。
 
 |`@Header("name")`
 |否
-|提取 HTTP 头
+|提取 HTTP 头值。
 
 |`@Body`
 |否
-|反序列化请求体
+|从 JSON 反序列化请求体。
 
 |`@Param("name")`
 |否
-|从消息负载提取命名参数
+|从消息载荷提取命名参数（用于 TCP/UDP）。
 |===
 
-== 返回类型
+== 支持的参数类型
+
+处理器方法可以接受以下参数类型而无需注解：
+
+[cols="2,4"]
+|===
+|类型 |描述
+
+|`NettyContext`
+|访问 channel、写入方法、channel 属性
+
+|`Channel`
+|直接访问 Netty channel
+
+|`InboundMessage`
+|带有头部和载荷的原始入站消息
+
+|`Map<String, Object>`
+|反序列化后的 JSON 载荷作为 Map
+|===
+
+示例：
 
 [source,java]
 ----
-// 同步返回
+@NettyMessageMapping("example")
+public Response handle(
+        NettyContext context,          // 自动注入
+        Channel channel,               // 自动注入
+        InboundMessage message,        // 自动注入
+        Map<String, Object> payload) { // 从 JSON 反序列化
+    // 所有参数都可用
+}
+----
+
+== 返回类型
+
+=== 同步返回
+
+[source,java]
+----
 @NettyMessageMapping("sync")
 public Response handleSync(Request request) {
-    return processRequest(request);
+    return processRequest(request);  // 阻塞直到完成
 }
+----
 
-// 异步返回
+=== 异步返回
+
+[source,java]
+----
 @NettyMessageMapping("async")
 public CompletableFuture<Response> handleAsync(Request request) {
-    return CompletableFuture.supplyAsync(() -> processRequest(request));
+    return CompletableFuture.supplyAsync(() -> {
+        // 在后台线程中处理
+        return processRequest(request);
+    });
 }
+----
 
-// 无返回值
+=== Void 返回（无响应）
+
+[source,java]
+----
 @NettyMessageMapping("fire-and-forget")
 public void handleNoResponse(Request request) {
+    // 处理但不发送响应
     eventBus.publish(request);
 }
+----
+
+=== OutboundMessage 返回（完全控制）
+
+[source,java]
+----
+@NettyMessageMapping("custom")
+public OutboundMessage handleCustom(Request request) {
+    if (request.isInvalid()) {
+        return OutboundMessage.error(400, "Invalid request");
+    }
+    return OutboundMessage.ok(processRequest(request));
+}
+----
+
+== NettyContext API
+
+`NettyContext` 提供对底层 channel 和工具的访问：
+
+[source,java]
+----
+@NettyMessageMapping("context-demo")
+public void demonstrateContext(NettyContext context) {
+    // 获取 channel 信息
+    String channelId = context.getChannelId();
+    String serverName = context.getServerName();
+    Channel channel = context.getChannel();
+
+    // 检查连接状态
+    boolean isActive = context.isActive();
+
+    // 直接写入 channel
+    context.write(response);
+    context.writeAndFlush(response);
+
+    // 关闭连接
+    context.close();
+
+    // 访问 channel 属性
+    context.getChannel().attr(MY_KEY).set(value);
+}
+----
+
+== 错误处理
+
+=== 处理器异常
+
+如果处理器抛出异常，框架会：
+
+1. 记录错误
+2. 返回错误响应（HTTP 500 或错误消息）
+3. 保持连接打开（除非是致命错误）
+
+[source,java]
+----
+@NettyMessageMapping("risky")
+public Response handleRisky(Request request) {
+    if (request.isInvalid()) {
+        throw new IllegalArgumentException("Invalid request");
+    }
+    return process(request);
+}
+// 客户端收到: {"code": 500, "message": "Invalid request"}
+----
+
+=== 自定义错误响应
+
+[source,java]
+----
+@NettyMessageMapping("validated")
+public OutboundMessage handleValidated(Request request) {
+    List<String> errors = validate(request);
+    if (!errors.isEmpty()) {
+        return OutboundMessage.error(400, "Validation failed: " + errors);
+    }
+    return OutboundMessage.ok(process(request));
+}
+----
+
+== 最佳实践
+
+=== 1. 保持处理器轻量
+
+将业务逻辑委托给服务：
+
+[source,java]
+----
+// 好的做法
+@NettyMessageMapping("order")
+public OrderResponse handleOrder(OrderRequest request) {
+    return orderService.processOrder(request);
+}
+
+// 避免
+@NettyMessageMapping("order")
+public OrderResponse handleOrder(OrderRequest request) {
+    // 不要在这里放业务逻辑
+    validateOrder(request);
+    Order order = createOrder(request);
+    saveOrder(order);
+    sendNotification(order);
+    return new OrderResponse(order);
+}
+----
+
+=== 2. 对慢操作使用异步
+
+[source,java]
+----
+@NettyMessageMapping("slow-operation")
+public CompletableFuture<Response> handleSlow(Request request) {
+    return CompletableFuture.supplyAsync(() -> {
+        // 数据库查询、外部 API 调用等
+        return slowService.process(request);
+    }, asyncExecutor);
+}
+----
+
+=== 3. 优雅地处理错误
+
+[source,java]
+----
+@NettyMessageMapping("robust")
+public OutboundMessage handleRobust(Request request) {
+    try {
+        return OutboundMessage.ok(service.process(request));
+    } catch (NotFoundException e) {
+        return OutboundMessage.error(404, e.getMessage());
+    } catch (ValidationException e) {
+        return OutboundMessage.error(400, e.getMessage());
+    } catch (Exception e) {
+        log.error("Unexpected error", e);
+        return OutboundMessage.error(500, "Internal server error");
+    }
+}
+----
+
+=== 4. 使用有意义的路由键
+
+[source,java]
+----
+// 好的做法 - 层级命名
+@NettyMessageMapping("user.create")
+@NettyMessageMapping("user.update")
+@NettyMessageMapping("order.submit")
+@NettyMessageMapping("order.cancel")
+
+// 避免 - 扁平命名
+@NettyMessageMapping("createUser")
+@NettyMessageMapping("submitOrder")
 ----

@@ -1,60 +1,102 @@
-= 服务端 Pipeline 源码解析
+= 服务端 Pipeline 源码分析
 :page-pagination:
 
-本文深入分析服务端 Pipeline 组装机制的源码实现。
+本文档深入分析服务端管道（Pipeline）的组装机制。理解这些代码有助于您有效地扩展框架。
 
 == 架构概览
 
 [source,text]
 ----
-┌─────────────────────────────────────────────────────────────────────┐
-│                        PipelineAssembler                             │
-│                                                                      │
-│  依赖:                                                               │
-│  ├── ProfileRegistry     协议配置注册表                              │
-│  ├── FeatureRegistry     特性注册表                                  │
-│  ├── Dispatcher          消息分发器                                  │
-│  └── CodecRegistry       编解码器注册表                              │
-│                                                                      │
-│  组装流程:                                                           │
-│  1. 设置协议类型属性                                                 │
-│  2. 应用低顺序 Features (0-199): SSL, ConnectionLimit, Logging      │
-│  3. 应用 Profile: 帧编解码器                                         │
-│  4. 应用高顺序 Features (200+): 业务特性                             │
-│  5. 添加 DispatcherHandler                                          │
-│  6. 添加 ExceptionHandler                                           │
-│  7. 应用自定义配置器                                                 │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              PipelineAssembler                                           │
+│                                                                                          │
+│  依赖项：                                                                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────────┐  │
+│  │ ProfileRegistry │  │ FeatureRegistry │  │   Dispatcher    │  │   CodecRegistry   │  │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  └─────────┬─────────┘  │
+│           │                    │                    │                      │            │
+│           └────────────────────┼────────────────────┼──────────────────────┘            │
+│                                │                    │                                    │
+│                                ▼                    ▼                                    │
+│                    ┌───────────────────────────────────────────┐                        │
+│                    │         assemble(pipeline, serverSpec)    │                        │
+│                    └───────────────────────────────────────────┘                        │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ----
 
-== 核心方法 assemble()
+== 核心类：PipelineAssembler
+
+`PipelineAssembler` 是构建服务端管道的核心协调器。它将 Profile、Feature 和自定义配置器组合成完整的处理器链。
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/pipeline/PipelineAssembler.java
+----
+
+=== 类定义
+
+[source,java]
+----
+public class PipelineAssembler {
+
+    private final ProfileRegistry profileRegistry;      // Profile 注册表
+    private final FeatureRegistry featureRegistry;      // Feature 注册表
+    private final Dispatcher dispatcher;                // 消息分发器
+    private final CodecRegistry codecRegistry;          // 编解码器注册表
+    private final List<NettyPipelineConfigurer> configurers;  // 自定义配置器
+
+    public PipelineAssembler(ProfileRegistry profileRegistry,
+                              FeatureRegistry featureRegistry,
+                              Dispatcher dispatcher,
+                              CodecRegistry codecRegistry,
+                              List<NettyPipelineConfigurer> configurers) {
+        this.profileRegistry = profileRegistry;
+        this.featureRegistry = featureRegistry;
+        this.dispatcher = dispatcher;
+        this.codecRegistry = codecRegistry;
+        this.configurers = new ArrayList<>(configurers);
+        // 按顺序排序配置器
+        this.configurers.sort(Comparator.comparingInt(NettyPipelineConfigurer::getOrder));
+    }
+}
+----
+
+=== assemble() 方法
+
+这是构建完整管道的核心方法：
 
 [source,java]
 ----
 public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec) {
+    // 根据名称获取 Profile
+    String profileName = serverSpec.getProfile();
     Profile profile = profileRegistry.getRequiredProfile(profileName);
 
-    // Step 0: 设置协议类型
-    pipeline.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).set(profile.getProtocolType());
+    // 步骤 0：为 ExceptionHandler 设置协议类型属性
+    String protocolType = profile.getProtocolType();
+    pipeline.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).set(protocolType);
 
-    // Step 1: 应用 order < 200 的 Features
+    // 步骤 1：应用顺序值在 [0, 200) 范围内的 Feature - SSL、连接限制、日志、限流
     applyFeatures(pipeline, serverSpec, 0, 200);
 
-    // Step 2: 应用 Profile
+    // 步骤 2：应用 Profile - 帧编码、基础编解码
     profile.configure(pipeline, serverSpec);
 
-    // Step 3: 应用 order >= 200 的 Features
+    // 步骤 3：应用顺序值在 [200, MAX) 范围内的 Feature - 业务层 Feature
     applyFeatures(pipeline, serverSpec, 200, Integer.MAX_VALUE);
 
-    // Step 4: 添加 DispatcherHandler
+    // 步骤 4：添加分发器处理器（如果 Profile 支持）
     if (profile.supportsDispatcher()) {
-        pipeline.addLast("dispatcherHandler", new DispatcherHandler(...));
+        pipeline.addLast("dispatcherHandler",
+                new DispatcherHandler(dispatcher, serverSpec, codecRegistry));
     }
 
-    // Step 5: 添加 ExceptionHandler
+    // 步骤 5：添加异常处理器
     pipeline.addLast("exceptionHandler", new ExceptionHandler());
 
-    // Step 6: 应用自定义配置器
+    // 步骤 6：应用自定义配置器
     for (NettyPipelineConfigurer configurer : configurers) {
         if (configurer.supports(serverSpec)) {
             configurer.configure(pipeline, serverSpec);
@@ -63,9 +105,418 @@ public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec) {
 }
 ----
 
+=== Feature 应用逻辑
+
+Feature 根据其顺序值被应用：
+
+[source,java]
+----
+private void applyFeatures(ChannelPipeline pipeline, ServerSpec serverSpec,
+                           int minOrder, int maxOrder) {
+    for (FeatureProvider feature : featureRegistry.getOrderedFeatures()) {
+        int order = feature.getOrder();
+        // 仅应用在指定顺序范围内且已启用的 Feature
+        if (order >= minOrder && order < maxOrder && feature.isEnabled(serverSpec)) {
+            logger.debug("Applying feature [{}] (order={})", feature.getName(), order);
+            feature.configure(pipeline, serverSpec);
+        }
+    }
+}
+----
+
+== Pipeline 组装流程
+
+[source,text]
+----
+                          assemble(pipeline, serverSpec)
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 0：设置协议类型属性                                                           │
+    │          channel.attr(PROTOCOL_TYPE_KEY).set("TCP" | "HTTP" | "WEBSOCKET")      │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 1：应用 Feature（顺序值 0-199）                                               │
+    │                                                                                  │
+    │  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐   │
+    │  │ SslFeatureProvider   │  │ConnectionLimitFeature│  │ LoggingFeatureProvider│  │
+    │  │     order = 10       │  │     order = 10       │  │     order = 50        │  │
+    │  │  → sslHandler        │  │  → connLimitHandler  │  │  → loggingHandler     │  │
+    │  └──────────────────────┘  └──────────────────────┘  └──────────────────────┘   │
+    │                                                                                  │
+    │  ┌──────────────────────┐  ┌──────────────────────┐                             │
+    │  │RateLimitFeatureProvider│ │IdleFeatureProvider  │                             │
+    │  │     order = 50        │  │     order = 150     │                             │
+    │  │  → rateLimitHandler   │  │  → idleStateHandler │                             │
+    │  └──────────────────────┘  └──────────────────────┘                             │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 2：应用 Profile                                                             │
+    │                                                                                  │
+    │  示例：tcp-lengthfield-json                                                       │
+    │  ┌──────────────────────────────────────────────────────────────────┐           │
+    │  │  pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(...))     │
+    │  │  pipeline.addLast("frameEncoder", new LengthFieldPrepender(4))               │
+    │  └──────────────────────────────────────────────────────────────────┘           │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 3：应用 Feature（顺序值 200+）                                                │
+    │  （业务层 Feature，通常顺序值 >= 200）                                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 4：添加 DispatcherHandler                                                   │
+    │                                                                                  │
+    │  pipeline.addLast("dispatcherHandler", new DispatcherHandler(                   │
+    │      dispatcher,     // 消息路由器                                                 │
+    │      serverSpec,     // 服务器配置                                                 │
+    │      codecRegistry   // 编解码器注册表                                              │
+    │  ))                                                                              │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 5：添加 ExceptionHandler                                                    │
+    │                                                                                  │
+    │  pipeline.addLast("exceptionHandler", new ExceptionHandler())                   │
+    │  → 根据 PROTOCOL_TYPE_KEY 返回不同的错误格式                                         │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  步骤 6：应用自定义配置器                                                           │
+    │                                                                                  │
+    │  for (NettyPipelineConfigurer configurer : configurers) {                       │
+    │      if (configurer.supports(serverSpec)) {                                      │
+    │          configurer.configure(pipeline, serverSpec);                            │
+    │      }                                                                           │
+    │  }                                                                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Profile 接口
+
+`Profile` 接口定义了协议栈配置：
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/profile/Profile.java
+----
+
+=== 接口定义
+
+[source,java]
+----
+public interface Profile {
+
+    /**
+     * 返回此 Profile 的唯一名称。
+     */
+    String getName();
+
+    /**
+     * 根据此 Profile 配置 Channel Pipeline。
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * 返回此 Profile 的默认编解码器类型。
+     */
+    default String getDefaultCodec() {
+        return "json";
+    }
+
+    /**
+     * 返回此 Profile 是否支持分发器处理器。
+     */
+    default boolean supportsDispatcher() {
+        return true;
+    }
+
+    /**
+     * 返回此 Profile 的协议类型。
+     * 供 ExceptionHandler 用于确定错误响应格式。
+     */
+    default String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
+}
+----
+
+=== 实现示例：TcpLengthFieldJsonProfile
+
+[source,java]
+----
+public class TcpLengthFieldJsonProfile implements Profile {
+
+    public static final String NAME = "tcp-lengthfield-json";
+
+    private static final int MAX_FRAME_LENGTH = 1024 * 1024;  // 1MB
+    private static final int LENGTH_FIELD_OFFSET = 0;
+    private static final int LENGTH_FIELD_LENGTH = 4;          // 4 字节长度前缀
+    private static final int LENGTH_ADJUSTMENT = 0;
+    private static final int INITIAL_BYTES_TO_STRIP = 4;       // 剥离长度字段
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 帧解码器 - 读取长度前缀并提取帧
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
+                MAX_FRAME_LENGTH,
+                LENGTH_FIELD_OFFSET,
+                LENGTH_FIELD_LENGTH,
+                LENGTH_ADJUSTMENT,
+                INITIAL_BYTES_TO_STRIP
+        ));
+
+        // 帧编码器 - 为出站消息添加长度前缀
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(LENGTH_FIELD_LENGTH));
+    }
+}
+----
+
+== FeatureProvider 接口
+
+Feature 是可组合的处理器套件，可以独立启用/禁用：
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/feature/FeatureProvider.java
+----
+
+=== 接口定义
+
+[source,java]
+----
+public interface FeatureProvider {
+
+    /**
+     * 返回此 Feature 的唯一名称。
+     */
+    String getName();
+
+    /**
+     * 返回此 Feature 应被应用的顺序值。
+     * 值越小越先被应用。推荐的范围：
+     *   0-100:   SSL/传输层
+     *   100-200: 连接治理
+     *   200-300: 帧编码
+     *   300-400: 编解码
+     *   400-500: 业务逻辑
+     *   500+:    出站/监控
+     */
+    int getOrder();
+
+    /**
+     * 使用此 Feature 的处理器配置 Channel Pipeline。
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * 返回此 Feature 是否对给定的服务器规格启用。
+     */
+    boolean isEnabled(ServerSpec serverSpec);
+}
+----
+
+=== 内置 Feature
+
+[cols="2,1,3"]
+|===
+|Feature |顺序值 |描述
+
+|`SslFeatureProvider`
+|10
+|添加 SSL/TLS 处理器用于加密通信
+
+|`ConnectionLimitFeatureProvider`
+|10
+|限制最大并发连接数
+
+|`LoggingFeatureProvider`
+|50
+|记录所有网络流量
+
+|`RateLimitFeatureProvider`
+|50
+|基于令牌桶的连接限流
+
+|`IdleFeatureProvider`
+|150
+|检测并处理空闲连接
+|===
+
+=== 实现示例：SslFeatureProvider
+
+[source,java]
+----
+public class SslFeatureProvider implements FeatureProvider {
+
+    public static final String NAME = "ssl";
+    public static final int ORDER = 10;  // Pipeline 中的第一个
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        SslSpec ssl = serverSpec.getFeatures().getSsl();
+        if (ssl != null && ssl.isEnabled()) {
+            SslContext sslContext = buildSslContext(ssl);
+            pipeline.addLast("sslHandler", sslContext.newHandler(pipeline.channel().alloc()));
+        }
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        SslSpec ssl = serverSpec.getFeatures().getSsl();
+        return ssl != null && ssl.isEnabled();
+    }
+
+    private SslContext buildSslContext(SslSpec ssl) throws SSLException, CertificateException {
+        // 从证书和密钥文件构建 SSL 上下文
+        // ...
+    }
+}
+----
+
+=== 实现示例：IdleFeatureProvider
+
+[source,java]
+----
+public class IdleFeatureProvider implements FeatureProvider {
+
+    public static final String NAME = "idle";
+    public static final int ORDER = 150;  // 在 SSL 之后，业务处理器之前
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        IdleSpec idle = serverSpec.getFeatures().getIdle();
+        if (idle != null && idle.isEnabled()) {
+            pipeline.addLast("idleStateHandler", new IdleStateHandler(
+                    idle.getReadSeconds(),
+                    idle.getWriteSeconds(),
+                    idle.getAllSeconds(),
+                    TimeUnit.SECONDS
+            ));
+        }
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        IdleSpec idle = serverSpec.getFeatures().getIdle();
+        return idle != null && idle.isEnabled();
+    }
+}
+----
+
+== NettyPipelineConfigurer 接口
+
+用于用户自定义管道定制的扩展点：
+
+=== 源码位置
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/pipeline/NettyPipelineConfigurer.java
+----
+
+=== 接口定义
+
+[source,java]
+----
+@FunctionalInterface
+public interface NettyPipelineConfigurer {
+
+    /**
+     * 配置 Channel Pipeline。
+     * 在 Profile 和 Feature 应用之后调用。
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * 返回此配置器是否应该应用于给定的服务器。
+     */
+    default boolean supports(ServerSpec serverSpec) {
+        return true;
+    }
+
+    /**
+     * 返回此配置器的应用顺序。
+     * 值越小越先被应用。
+     */
+    default int getOrder() {
+        return 0;
+    }
+}
+----
+
+=== 使用示例
+
+[source,java]
+----
+@Component
+public class MetricsConfigurer implements NettyPipelineConfigurer {
+
+    private final MeterRegistry meterRegistry;
+
+    public MetricsConfigurer(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("metricsHandler", new MetricsHandler(meterRegistry, serverSpec.getName()));
+    }
+
+    @Override
+    public boolean supports(ServerSpec serverSpec) {
+        // 仅应用于启用了指标的服务器
+        return "production-server".equals(serverSpec.getName());
+    }
+
+    @Override
+    public int getOrder() {
+        return 100;  // 在其他配置器之后
+    }
+}
+----
+
 == 最终 Pipeline 结构
 
-TCP Length-Field JSON 服务器 (启用 SSL + Idle):
+=== TCP 长度字段 JSON 服务器（带 SSL + 空闲检测）
 
 [source,text]
 ----
@@ -79,9 +530,112 @@ ChannelPipeline:
 └── [7] customHandler           (NettyPipelineConfigurer)
 ----
 
-== 相关源文件
+=== HTTP JSON 服务器（带日志 + 限流）
 
-* `PipelineAssembler.java` - Pipeline 组装器
-* `Profile.java` - 协议配置接口
-* `FeatureProvider.java` - 特性提供者接口
-* `NettyPipelineConfigurer.java` - 自定义配置器接口
+[source,text]
+----
+ChannelPipeline:
+├── [1] loggingHandler          (LoggingFeatureProvider, order=50)
+├── [2] rateLimitHandler        (RateLimitFeatureProvider, order=50)
+├── [3] httpCodec               (Http1JsonProfile)
+├── [4] httpAggregator          (Http1JsonProfile)
+├── [5] dispatcherHandler       (PipelineAssembler)
+└── [6] exceptionHandler        (PipelineAssembler)
+----
+
+== 创建自定义扩展
+
+=== 自定义 Profile
+
+[source,java]
+----
+@Component
+public class ProtobufProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "tcp-lengthfield-protobuf";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 帧编解码器
+        pipeline.addLast("frameDecoder",
+            new LengthFieldBasedFrameDecoder(1048576, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder",
+            new LengthFieldPrepender(4));
+
+        // Protobuf 编解码器
+        pipeline.addLast("protobufDecoder",
+            new ProtobufDecoder(MyMessage.getDefaultInstance()));
+        pipeline.addLast("protobufEncoder",
+            new ProtobufEncoder());
+    }
+
+    @Override
+    public String getDefaultCodec() {
+        return "protobuf";
+    }
+}
+----
+
+=== 自定义 Feature
+
+[source,java]
+----
+@Component
+public class IpWhitelistFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 5;  // 在 SSL 之前
+
+    @Override
+    public String getName() {
+        return "ipWhitelist";
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> config = (Map<String, Object>) features.get("ipWhitelist");
+        return config != null && Boolean.TRUE.equals(config.get("enabled"));
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        Map<String, Object> config = (Map<String, Object>)
+            serverSpec.getFeatures().get("ipWhitelist");
+        List<String> allowedIps = (List<String>) config.get("allowedIps");
+
+        IpFilterRule[] rules = allowedIps.stream()
+            .map(ip -> createRule(ip))
+            .toArray(IpFilterRule[]::new);
+
+        pipeline.addLast("ipFilter", new RuleBasedIpFilter(rules));
+    }
+}
+----
+
+== 总结
+
+服务端 Pipeline 组装遵循清晰的顺序：
+
+1. **协议类型** - 为错误处理设置
+2. **低顺序值 Feature（0-199）** - SSL、连接限制、日志
+3. **Profile** - 帧编码/解码
+4. **高顺序值 Feature（200+）** - 业务层 Feature
+5. **Dispatcher** - 消息路由
+6. **Exception Handler** - 错误处理
+7. **自定义配置器** - 用户扩展
+
+这种分层方法提供了：
+
+* **关注点分离** - 每个组件都有单一职责
+* **灵活性** - 易于添加/移除 Feature
+* **可扩展性** - 自定义 Profile、Feature 和配置器
+* **一致性** - 跨服务器的标准 Pipeline 结构

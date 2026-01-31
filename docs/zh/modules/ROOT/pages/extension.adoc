@@ -1,18 +1,16 @@
 = 扩展点
 :page-pagination:
 
-本页介绍 Netty Spring Boot Starter 提供的扩展点。
+Netty Spring Boot Starter 提供多个扩展点用于自定义。
 
-== 服务端扩展
+== 自定义 Profile
 
-=== 自定义协议配置 (Profile)
-
-实现 `Profile` 接口：
+创建自定义协议 Profile：
 
 [source,java]
 ----
 @Component
-public class MyProfile implements Profile {
+public class MyCustomProfile implements Profile {
 
     @Override
     public String getName() {
@@ -21,49 +19,100 @@ public class MyProfile implements Profile {
 
     @Override
     public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        // 配置 Pipeline
+        pipeline.addLast("myDecoder", new MyDecoder());
+        pipeline.addLast("myEncoder", new MyEncoder());
+    }
+
+    @Override
+    public String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
     }
 }
 ----
 
-=== 自定义特性 (Feature)
+在配置中使用：
 
-实现 `FeatureProvider` 接口：
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        profile: my-custom-profile
+----
+
+== 自定义编解码器
+
+创建自定义序列化编解码器：
 
 [source,java]
 ----
 @Component
-public class MyFeature implements FeatureProvider {
+public class ProtobufCodec implements NettyCodec {
 
     @Override
-    public String getName() { return "myFeature"; }
+    public String getName() {
+        return "protobuf";
+    }
 
     @Override
-    public int getOrder() { return 100; }
+    public byte[] encode(Object object) {
+        return ((Message) object).toByteArray();
+    }
 
     @Override
-    public boolean isEnabled(ServerSpec serverSpec) { return true; }
-
-    @Override
-    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        pipeline.addLast("myHandler", new MyHandler());
+    public <T> T decode(byte[] bytes, Class<T> targetType) {
+        try {
+            Method parseFrom = targetType.getMethod("parseFrom", byte[].class);
+            return targetType.cast(parseFrom.invoke(null, bytes));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to decode protobuf", e);
+        }
     }
 }
 ----
 
-=== Pipeline 配置器
+== Pipeline 配置器
 
-实现 `NettyPipelineConfigurer` 接口：
+为特定服务器添加自定义处理器：
 
 [source,java]
 ----
 @Component
-public class MyConfigurer implements NettyPipelineConfigurer {
+public class MyPipelineConfigurer implements NettyPipelineConfigurer {
 
     @Override
     public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
-        // 在 Profile 和 Feature 之后执行
-        pipeline.addLast("customHandler", new CustomHandler());
+        // 在 dispatcher 之前添加处理器
+        pipeline.addBefore("dispatcherHandler", "myHandler", new MyHandler());
+    }
+
+    @Override
+    public boolean supports(ServerSpec serverSpec) {
+        // 仅应用于特定服务器
+        return "my-server".equals(serverSpec.getName());
+    }
+
+    @Override
+    public int getOrder() {
+        return 0;  // 值越小越早执行
+    }
+}
+----
+
+== 自定义路由解析器
+
+创建自定义路由键提取：
+
+[source,java]
+----
+@Component
+public class MyRouteResolver implements NettyRouteResolver {
+
+    @Override
+    public String resolveRouteKey(InboundMessage message) {
+        // 从自定义头部提取路由键
+        return (String) message.getHeader("cmd");
     }
 
     @Override
@@ -73,11 +122,47 @@ public class MyConfigurer implements NettyPipelineConfigurer {
 }
 ----
 
-== 客户端扩展
+== 自定义参数解析器
 
-=== 自定义客户端协议配置
+创建自定义参数解析：
 
-实现 `ClientProfile` 接口：
+[source,java]
+----
+@Component
+public class UserArgumentResolver implements ArgumentResolver {
+
+    @Override
+    public boolean supports(Parameter parameter) {
+        return parameter.getType() == User.class;
+    }
+
+    @Override
+    public Object resolve(Parameter parameter, InboundMessage message,
+                          NettyContext context, Map<String, String> pathVariables) {
+        // 从会话或令牌解析 User
+        String token = (String) message.getHeader("header.authorization");
+        return userService.getUserFromToken(token);
+    }
+}
+----
+
+注册它：
+
+[source,java]
+----
+@Configuration
+public class NettyConfig {
+
+    @Autowired
+    public void configureArgumentResolvers(Dispatcher dispatcher) {
+        dispatcher.getArgumentResolvers().addResolver(new UserArgumentResolver());
+    }
+}
+----
+
+== 自定义客户端 Profile
+
+创建自定义客户端 Profile：
 
 [source,java]
 ----
@@ -91,28 +176,57 @@ public class MyClientProfile implements ClientProfile {
 
     @Override
     public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
-        // 配置客户端 Pipeline
+        pipeline.addLast("myDecoder", new MyDecoder());
+        pipeline.addLast("myEncoder", new MyEncoder());
     }
 }
 ----
 
-== 事件监听
+== 自定义特性提供者
 
-监听 Netty 生命周期事件：
+创建自定义特性：
 
 [source,java]
 ----
 @Component
-public class NettyEventListener {
+public class MetricsFeatureProvider implements FeatureProvider {
 
-    @EventListener
-    public void onServerStarted(NettyServerStartedEvent event) {
-        log.info("服务器启动: {}", event.getServerName());
+    public static final int ORDER = 180;
+
+    @Override
+    public String getName() {
+        return "metrics";
     }
 
-    @EventListener
-    public void onClientConnected(NettyClientConnectedEvent event) {
-        log.info("客户端连接: {}", event.getClientName());
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> metrics = (Map<String, Object>) features.get("metrics");
+        return metrics != null && Boolean.TRUE.equals(metrics.get("enabled"));
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("metricsHandler", new MetricsHandler());
     }
 }
+----
+
+配置：
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          metrics:
+            enabled: true
 ----

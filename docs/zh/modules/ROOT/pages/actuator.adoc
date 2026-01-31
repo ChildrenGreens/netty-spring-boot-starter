@@ -1,94 +1,218 @@
 = Actuator 集成
 :page-pagination:
 
-Netty Spring Boot Starter 与 Spring Boot Actuator 集成，提供健康检查、指标和端点。
+当 `spring-boot-actuator` 在 classpath 中时，Netty Spring Boot Starter 提供端点和指标。
 
-== 启用 Actuator
+== 端点
 
-添加依赖：
+[cols="2,3"]
+|===
+|端点 |描述
 
-[source,xml]
+|`GET /actuator/netty`
+|列出所有 Netty 服务器和客户端
+
+|`GET /actuator/netty/servers`
+|列出所有服务器详情
+
+|`GET /actuator/netty/servers/\{name\}`
+|获取特定服务器信息
+
+|`GET /actuator/netty/clients`
+|列出所有客户端详情
+
+|`GET /actuator/netty/clients/\{name\}`
+|获取特定客户端信息
+
+|`GET /actuator/health/netty`
+|所有组件的健康检查
+|===
+
+== 启用端点
+
+[source,yaml]
 ----
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-actuator</artifactId>
-</dependency>
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,netty
+  endpoint:
+    netty:
+      enabled: true
 ----
 
-== 健康检查
+== 响应示例
 
-Netty 服务器和客户端自动注册健康指示器：
+=== 列出所有
 
 [source,bash]
 ----
-GET /actuator/health
+GET /actuator/netty
 ----
 
 [source,json]
 ----
 {
-  "status": "UP",
-  "components": {
-    "nettyServers": {
-      "status": "UP",
-      "details": {
-        "my-server": "RUNNING on port 9000"
-      }
-    },
-    "nettyClients": {
-      "status": "UP",
-      "details": {
-        "order-service": "CONNECTED to 127.0.0.1:9000"
-      }
-    }
+  "servers": ["tcp-server", "http-server"],
+  "clients": ["order-service"]
+}
+----
+
+=== 服务器详情
+
+[source,bash]
+----
+GET /actuator/netty/servers/tcp-server
+----
+
+[source,json]
+----
+{
+  "name": "tcp-server",
+  "transport": "TCP",
+  "host": "0.0.0.0",
+  "port": 9000,
+  "profile": "tcp-lengthfield-json",
+  "status": "RUNNING",
+  "connections": {
+    "current": 42,
+    "total": 1523
   }
 }
 ----
 
-== Netty 端点
-
-=== 服务器信息
-
-[source,bash]
-----
-GET /actuator/netty/servers
-----
-
-=== 客户端信息
-
-[source,bash]
-----
-GET /actuator/netty/clients
-----
-
-=== 特定客户端详情
+=== 客户端详情
 
 [source,bash]
 ----
 GET /actuator/netty/clients/order-service
 ----
 
-== Micrometer 指标
+[source,json]
+----
+{
+  "name": "order-service",
+  "host": "127.0.0.1",
+  "port": 9000,
+  "profile": "tcp-lengthfield-json",
+  "status": "CONNECTED",
+  "pool": {
+    "size": 10,
+    "active": 3,
+    "idle": 7,
+    "pending": 0
+  }
+}
+----
+
+=== 健康检查
+
+[source,bash]
+----
+GET /actuator/health/netty
+----
+
+[source,json]
+----
+{
+  "status": "UP",
+  "details": {
+    "servers": {
+      "tcp-server": "UP",
+      "http-server": "UP"
+    },
+    "clients": {
+      "order-service": "UP"
+    }
+  }
+}
+----
+
+== 指标（Micrometer）
+
+=== 服务器指标
 
 [cols="2,3"]
 |===
 |指标 |描述
 
-|`netty.server.connections`
-|当前连接数
+|`netty.server.connections.current`
+|当前服务器连接数
 
-|`netty.server.messages.received`
-|接收消息数
+|`netty.server.connections.total`
+|服务器总连接数
 
-|`netty.server.messages.sent`
-|发送消息数
+|`netty.server.bytes.in`
+|服务器接收字节数
+
+|`netty.server.bytes.out`
+|服务器发送字节数
+
+|`netty.server.requests.total`
+|服务器请求计数
+
+|`netty.server.request.latency`
+|服务器请求延迟
+|===
+
+=== 客户端指标
+
+[cols="2,3"]
+|===
+|指标 |描述
+
+|`netty.client.connections.current`
+|当前客户端连接数
 
 |`netty.client.pool.size`
 |连接池大小
 
-|`netty.client.pool.active`
-|活跃连接数
+|`netty.client.pool.pending`
+|等待中的连接请求
 
-|`netty.client.requests`
-|请求数
+|`netty.client.requests.total`
+|客户端请求计数
+
+|`netty.client.request.latency`
+|客户端请求延迟
+
+|`netty.client.reconnect.count`
+|重连尝试次数
 |===
+
+== Prometheus 示例
+
+[source,bash]
+----
+GET /actuator/prometheus
+----
+
+[source,text]
+----
+# HELP netty_server_connections_current Current server connections
+# TYPE netty_server_connections_current gauge
+netty_server_connections_current{server="tcp-server"} 42.0
+netty_server_connections_current{server="http-server"} 15.0
+
+# HELP netty_server_requests_total Total server requests
+# TYPE netty_server_requests_total counter
+netty_server_requests_total{server="tcp-server"} 15230.0
+
+# HELP netty_client_pool_size Connection pool size
+# TYPE netty_client_pool_size gauge
+netty_client_pool_size{client="order-service"} 10.0
+----
+
+== 配置
+
+启用可观测性功能：
+
+[source,yaml]
+----
+spring:
+  netty:
+    observability:
+      metrics: true    # 启用 Micrometer 指标
+      health: true     # 启用健康检查
+----
