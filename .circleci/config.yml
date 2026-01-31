@@ -2,7 +2,6 @@ version: 2.1  # CircleCI config schema version
 
 orbs:
   codecov: codecov/codecov@4  # Official Codecov orb for uploads
-  macos: circleci/macos@2  # Official macOS orb
 
 jobs:
   build-and-test-linux:
@@ -31,10 +30,8 @@ jobs:
         default: "16.2.0"
     macos:
       xcode: << parameters.xcode-version >>
-    resource_class: macos.m1.medium.gen1
     steps:
       - checkout  # Fetch repository code
-      - macos/install-rosetta  # Required for some tools on M1
       - run:
           name: Check Java version
           command: |
