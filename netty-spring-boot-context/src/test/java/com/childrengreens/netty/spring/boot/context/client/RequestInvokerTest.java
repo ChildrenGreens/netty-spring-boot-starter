@@ -17,9 +17,13 @@
 package com.childrengreens.netty.spring.boot.context.client;
 
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
+import com.childrengreens.netty.spring.boot.context.metrics.ClientMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import com.childrengreens.netty.spring.boot.context.properties.TimeoutSpec;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.concurrent.GenericFutureListener;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,9 +31,13 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link RequestInvoker}.
@@ -38,6 +46,7 @@ class RequestInvokerTest {
 
     private RequestInvoker invoker;
     private ClientSpec clientSpec;
+    private ClientMetrics clientMetrics;
 
     @BeforeEach
     void setUp() {
@@ -48,6 +57,7 @@ class RequestInvokerTest {
         clientSpec.setTimeout(timeout);
 
         invoker = new RequestInvoker(clientSpec, new JsonNettyCodec());
+        clientMetrics = new ClientMetrics("test-client");
     }
 
     @AfterEach
@@ -270,6 +280,179 @@ class RequestInvokerTest {
         assertThat(request.get("type")).isEqualTo("createOrder");
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
 
+        channel.close();
+    }
+
+    // ==================== Tests for writeAndFlush failure (lines 112-114) ====================
+
+    @Test
+    void invoke_writeAndFlushFails_completesExceptionally() throws Exception {
+        // Create a mock channel where writeAndFlush fails
+        Channel channel = mock(Channel.class);
+        ChannelFuture channelFuture = mock(ChannelFuture.class);
+        when(channel.writeAndFlush(any())).thenReturn(channelFuture);
+
+        // Capture the listener and immediately invoke it with failure
+        doAnswer(invocation -> {
+            GenericFutureListener listener = invocation.getArgument(0);
+            when(channelFuture.isSuccess()).thenReturn(false);
+            when(channelFuture.cause()).thenReturn(new RuntimeException("Write failed"));
+            listener.operationComplete(channelFuture);
+            return channelFuture;
+        }).when(channelFuture).addListener(any());
+
+        CompletableFuture<Object> future = invoker.invoke(channel, "test", null, 0);
+
+        assertThat(future.isCompletedExceptionally()).isTrue();
+        assertThatThrownBy(() -> future.get())
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Write failed");
+    }
+
+    // ==================== Tests for exception in invoke try block (lines 120-122) ====================
+
+    @Test
+    void invoke_channelThrowsException_completesExceptionally() throws Exception {
+        Channel channel = mock(Channel.class);
+        when(channel.writeAndFlush(any())).thenThrow(new RuntimeException("Channel error"));
+
+        CompletableFuture<Object> future = invoker.invoke(channel, "test", null, 0);
+
+        assertThat(future.isCompletedExceptionally()).isTrue();
+        assertThatThrownBy(() -> future.get())
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Channel error");
+    }
+
+    // ==================== Tests for clientMetrics recording (lines 127-129) ====================
+
+    @Test
+    void invoke_withClientMetrics_recordsLatencyOnCompletion() throws Exception {
+        invoker.setClientMetrics(clientMetrics);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+        CompletableFuture<Object> future = invoker.invoke(channel, "ping", null, 0);
+
+        // Get the correlation ID from the outbound request
+        Map<String, Object> request = channel.readOutbound();
+        String correlationId = (String) request.get(RequestInvoker.CORRELATION_ID_HEADER);
+
+        // Complete the request
+        invoker.completeRequest(correlationId, Map.of("result", "pong"));
+
+        // Wait for completion
+        future.get(1, TimeUnit.SECONDS);
+
+        // Verify metrics were recorded
+        assertThat(clientMetrics.getRequestsTotal()).isEqualTo(1);
+        assertThat(clientMetrics.getRequestLatencyTotalNanos()).isGreaterThan(0);
+
+        channel.close();
+    }
+
+    // ==================== Tests for invokeOneWay with metrics and exception (lines 146-150) ====================
+
+    @Test
+    void invokeOneWay_withClientMetrics_incrementsRequestCount() {
+        invoker.setClientMetrics(clientMetrics);
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+        invoker.invokeOneWay(channel, "notify", Map.of("event", "test"));
+
+        // Verify metrics were recorded (no latency, just count)
+        assertThat(clientMetrics.getRequestsTotal()).isEqualTo(1);
+        assertThat(clientMetrics.getRequestLatencyTotalNanos()).isEqualTo(0);
+
+        channel.close();
+    }
+
+    @Test
+    void invokeOneWay_throwsException_logsErrorAndContinues() {
+        // Mock channel that throws on writeAndFlush
+        Channel channel = mock(Channel.class);
+        when(channel.writeAndFlush(any())).thenThrow(new RuntimeException("One-way write failed"));
+
+        // Should not throw - exception is caught and logged
+        invoker.invokeOneWay(channel, "notify", Map.of("event", "test"));
+
+        // Verify writeAndFlush was called
+        verify(channel).writeAndFlush(any());
+    }
+
+    // ==================== Tests for payload as String and complex object (lines 172-176) ====================
+
+    @Test
+    void invoke_withStringPayload_wrapsInDataField() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        invoker.invoke(channel, "message", "Hello, World!", 0);
+
+        Map<String, Object> request = channel.readOutbound();
+        assertThat(request.get("type")).isEqualTo("message");
+        assertThat(request.get("data")).isEqualTo("Hello, World!");
+        assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
+
+        channel.close();
+    }
+
+    @Test
+    void invoke_withComplexObjectPayload_wrapsInDataField() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        // Use a complex object (not Map, not String)
+        record Order(String id, int amount) {}
+        Order order = new Order("ORD-123", 100);
+
+        invoker.invoke(channel, "createOrder", order, 0);
+
+        Map<String, Object> request = channel.readOutbound();
+        assertThat(request.get("type")).isEqualTo("createOrder");
+        assertThat(request.get("data")).isEqualTo(order);
+        assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
+
+        channel.close();
+    }
+
+    @Test
+    void invokeOneWay_withStringPayload_wrapsInDataField() {
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        invoker.invokeOneWay(channel, "log", "Log message");
+
+        Map<String, Object> request = channel.readOutbound();
+        assertThat(request.get("type")).isEqualTo("log");
+        assertThat(request.get("data")).isEqualTo("Log message");
+
+        channel.close();
+    }
+
+    // ==================== Tests for timeout expiration (lines 236-240) ====================
+
+    @Test
+    void invoke_requestTimesOut_completesExceptionally() throws Exception {
+        // Create invoker with very short timeout
+        ClientSpec shortTimeoutSpec = new ClientSpec();
+        shortTimeoutSpec.setName("timeout-test");
+        TimeoutSpec timeout = new TimeoutSpec();
+        timeout.setRequestMs(100); // 100ms timeout
+        shortTimeoutSpec.setTimeout(timeout);
+        RequestInvoker shortInvoker = new RequestInvoker(shortTimeoutSpec, new JsonNettyCodec());
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        CompletableFuture<Object> future = shortInvoker.invoke(channel, "slow-request", null, 0);
+
+        // Don't complete the request - let it timeout
+        // Wait for the timeout checker to run (runs every 1 second)
+        Thread.sleep(1500);
+
+        // The request should be completed exceptionally due to timeout
+        assertThat(future.isCompletedExceptionally()).isTrue();
+        assertThat(shortInvoker.getPendingRequestCount()).isEqualTo(0);
+
+        shortInvoker.close();
         channel.close();
     }
 
