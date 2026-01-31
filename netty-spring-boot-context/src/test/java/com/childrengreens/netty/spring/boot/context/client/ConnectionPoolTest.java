@@ -835,11 +835,15 @@ class ConnectionPoolTest {
         ChannelFuture mockFuture = mock(ChannelFuture.class);
         EmbeddedChannel channel = new EmbeddedChannel();
 
+        // Use CountDownLatch for reliable synchronization
+        java.util.concurrent.CountDownLatch connectionStarted = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch poolClosed = new java.util.concurrent.CountDownLatch(1);
+
         when(mockBootstrap.connect(anyString(), anyInt())).thenReturn(mockFuture);
-        // Simulate slow connection
+        // Simulate slow connection that waits for pool to close
         when(mockFuture.await(anyLong(), any(TimeUnit.class))).thenAnswer(invocation -> {
-            // Simulate some delay during which pool might be closed
-            Thread.sleep(10);
+            connectionStarted.countDown(); // Signal that connection has started
+            poolClosed.await(); // Wait for pool to be closed
             return true;
         });
         when(mockFuture.isSuccess()).thenReturn(true);
@@ -861,11 +865,12 @@ class ConnectionPoolTest {
         });
         acquireThread.start();
 
-        // Give the acquire thread a chance to start
-        Thread.sleep(5);
+        // Wait for connection to actually start
+        connectionStarted.await(1, TimeUnit.SECONDS);
 
         // Close pool while connection is in progress
         pool.close();
+        poolClosed.countDown(); // Allow connection to complete
 
         // Wait for acquire thread to complete
         acquireThread.join(1000);
