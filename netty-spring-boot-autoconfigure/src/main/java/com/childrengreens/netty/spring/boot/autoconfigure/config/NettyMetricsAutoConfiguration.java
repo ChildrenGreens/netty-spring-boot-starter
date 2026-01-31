@@ -22,12 +22,11 @@ import com.childrengreens.netty.spring.boot.context.server.NettyServerOrchestrat
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Conditional;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * Auto-configuration for Netty metrics with Micrometer.
@@ -50,37 +49,32 @@ import org.springframework.context.annotation.Conditional;
 public class NettyMetricsAutoConfiguration {
 
     /**
-     * Create the Netty metrics binder.
-     * @param serverOrchestrator the server orchestrator (optional)
-     * @param clientOrchestrator the client orchestrator (optional)
-     * @return the metrics binder
+     * Configuration for metrics binder when server orchestrator is present.
      */
-    @Bean
-    @ConditionalOnMissingBean
-    @Conditional(OnServerOrClientCondition.class)
-    public NettyMetricsBinder nettyMetricsBinder(
-            ObjectProvider<NettyServerOrchestrator> serverOrchestrator,
-            ObjectProvider<NettyClientOrchestrator> clientOrchestrator) {
-        NettyServerOrchestrator server = serverOrchestrator.getIfAvailable();
-        NettyClientOrchestrator client = clientOrchestrator.getIfAvailable();
-        return new NettyMetricsBinder(server, client);
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBean(NettyServerOrchestrator.class)
+    static class ServerMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        NettyMetricsBinder nettyMetricsBinder(
+                NettyServerOrchestrator serverOrchestrator,
+                ObjectProvider<NettyClientOrchestrator> clientOrchestrator) {
+            return new NettyMetricsBinder(serverOrchestrator, clientOrchestrator.getIfAvailable());
+        }
     }
 
     /**
-     * Condition that matches when either server or client orchestrator is present.
+     * Configuration for metrics binder when only client orchestrator is present.
      */
-    static class OnServerOrClientCondition extends AnyNestedCondition {
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBean(NettyClientOrchestrator.class)
+    @ConditionalOnMissingBean(NettyMetricsBinder.class)
+    static class ClientMetricsConfiguration {
 
-        OnServerOrClientCondition() {
-            super(ConfigurationPhase.REGISTER_BEAN);
-        }
-
-        @ConditionalOnBean(NettyServerOrchestrator.class)
-        static class OnServerOrchestrator {
-        }
-
-        @ConditionalOnBean(NettyClientOrchestrator.class)
-        static class OnClientOrchestrator {
+        @Bean
+        NettyMetricsBinder nettyMetricsBinder(NettyClientOrchestrator clientOrchestrator) {
+            return new NettyMetricsBinder(null, clientOrchestrator);
         }
     }
 
