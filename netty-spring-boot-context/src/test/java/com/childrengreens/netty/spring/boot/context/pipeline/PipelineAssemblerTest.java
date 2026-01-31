@@ -19,16 +19,19 @@ package com.childrengreens.netty.spring.boot.context.pipeline;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
+import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
 import com.childrengreens.netty.spring.boot.context.profile.ProfileRegistry;
 import com.childrengreens.netty.spring.boot.context.profile.TcpLengthFieldJsonProfile;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.routing.Router;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -90,7 +93,7 @@ class PipelineAssemblerTest {
 
             @Override
             public boolean supports(ServerSpec serverSpec) {
-                return true;
+                return NettyPipelineConfigurer.super.supports(serverSpec);
             }
         };
 
@@ -146,6 +149,237 @@ class PipelineAssemblerTest {
         assembler.assemble(channel.pipeline(), serverSpec);
 
         assertThat(channel.pipeline().names()).doesNotContain("customHandler");
+
+        channel.close();
+    }
+
+    // ==================== Tests for applyFeatures (lines 136-145) ====================
+
+    @Test
+    void assemble_withEnabledFeature_appliesFeature() {
+        // Create a test feature with order < 200 (applied before profile)
+        AtomicBoolean featureApplied = new AtomicBoolean(false);
+        FeatureProvider testFeature = new FeatureProvider() {
+            @Override
+            public String getName() {
+                return "test-feature";
+            }
+
+            @Override
+            public int getOrder() {
+                return 50; // Low order, applied before profile
+            }
+
+            @Override
+            public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+                featureApplied.set(true);
+                pipeline.addLast("testFeatureHandler", new io.netty.channel.ChannelInboundHandlerAdapter());
+            }
+
+            @Override
+            public boolean isEnabled(ServerSpec serverSpec) {
+                return true;
+            }
+        };
+
+        featureRegistry.register(testFeature);
+
+        assembler = new PipelineAssembler(
+                profileRegistry,
+                featureRegistry,
+                dispatcher,
+                codecRegistry,
+                Collections.emptyList()
+        );
+
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assembler.assemble(channel.pipeline(), serverSpec);
+
+        assertThat(featureApplied.get()).isTrue();
+        assertThat(channel.pipeline().names()).contains("testFeatureHandler");
+
+        channel.close();
+    }
+
+    @Test
+    void assemble_withDisabledFeature_skipsFeature() {
+        // Create a test feature that is disabled
+        AtomicBoolean featureApplied = new AtomicBoolean(false);
+        FeatureProvider testFeature = new FeatureProvider() {
+            @Override
+            public String getName() {
+                return "disabled-feature";
+            }
+
+            @Override
+            public int getOrder() {
+                return 50;
+            }
+
+            @Override
+            public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+                featureApplied.set(true);
+                pipeline.addLast("disabledFeatureHandler", new io.netty.channel.ChannelInboundHandlerAdapter());
+            }
+
+            @Override
+            public boolean isEnabled(ServerSpec serverSpec) {
+                return false; // Disabled
+            }
+        };
+
+        featureRegistry.register(testFeature);
+
+        assembler = new PipelineAssembler(
+                profileRegistry,
+                featureRegistry,
+                dispatcher,
+                codecRegistry,
+                Collections.emptyList()
+        );
+
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assembler.assemble(channel.pipeline(), serverSpec);
+
+        assertThat(featureApplied.get()).isFalse();
+        assertThat(channel.pipeline().names()).doesNotContain("disabledFeatureHandler");
+
+        channel.close();
+    }
+
+    @Test
+    void assemble_withHighOrderFeature_appliesAfterProfile() {
+        // Create a feature with order >= 200 (applied after profile)
+        AtomicBoolean featureApplied = new AtomicBoolean(false);
+        FeatureProvider highOrderFeature = new FeatureProvider() {
+            @Override
+            public String getName() {
+                return "high-order-feature";
+            }
+
+            @Override
+            public int getOrder() {
+                return 300; // High order, applied after profile
+            }
+
+            @Override
+            public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+                featureApplied.set(true);
+                pipeline.addLast("highOrderHandler", new io.netty.channel.ChannelInboundHandlerAdapter());
+            }
+
+            @Override
+            public boolean isEnabled(ServerSpec serverSpec) {
+                return true;
+            }
+        };
+
+        featureRegistry.register(highOrderFeature);
+
+        assembler = new PipelineAssembler(
+                profileRegistry,
+                featureRegistry,
+                dispatcher,
+                codecRegistry,
+                Collections.emptyList()
+        );
+
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assembler.assemble(channel.pipeline(), serverSpec);
+
+        assertThat(featureApplied.get()).isTrue();
+        assertThat(channel.pipeline().names()).contains("highOrderHandler");
+
+        channel.close();
+    }
+
+    @Test
+    void assemble_withMultipleFeatures_appliesInOrderRange() {
+        // Feature with order 50 (low, before profile)
+        AtomicBoolean lowOrderApplied = new AtomicBoolean(false);
+        FeatureProvider lowOrderFeature = new FeatureProvider() {
+            @Override
+            public String getName() {
+                return "low-order";
+            }
+
+            @Override
+            public int getOrder() {
+                return 50;
+            }
+
+            @Override
+            public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+                lowOrderApplied.set(true);
+            }
+
+            @Override
+            public boolean isEnabled(ServerSpec serverSpec) {
+                return true;
+            }
+        };
+
+        // Feature with order 250 (high, after profile)
+        AtomicBoolean highOrderApplied = new AtomicBoolean(false);
+        FeatureProvider highOrderFeature = new FeatureProvider() {
+            @Override
+            public String getName() {
+                return "high-order";
+            }
+
+            @Override
+            public int getOrder() {
+                return 250;
+            }
+
+            @Override
+            public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+                highOrderApplied.set(true);
+            }
+
+            @Override
+            public boolean isEnabled(ServerSpec serverSpec) {
+                return true;
+            }
+        };
+
+        featureRegistry.register(lowOrderFeature);
+        featureRegistry.register(highOrderFeature);
+
+        assembler = new PipelineAssembler(
+                profileRegistry,
+                featureRegistry,
+                dispatcher,
+                codecRegistry,
+                Collections.emptyList()
+        );
+
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assembler.assemble(channel.pipeline(), serverSpec);
+
+        // Both features should be applied (low before profile, high after)
+        assertThat(lowOrderApplied.get()).isTrue();
+        assertThat(highOrderApplied.get()).isTrue();
 
         channel.close();
     }

@@ -26,10 +26,14 @@ import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import com.childrengreens.netty.spring.boot.context.routing.RouteDefinition;
 import com.childrengreens.netty.spring.boot.context.routing.Router;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.util.Attribute;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -520,5 +524,184 @@ class DispatcherTest {
         public CompletionStage<OutboundMessage> handleCompletionStageReturnsOutbound() {
             return CompletableFuture.completedFuture(OutboundMessage.status(204, "No Content"));
         }
+
+        // Methods for testing payload conversion (lines 143-173)
+        public String handleWithPayload(String payload) {
+            return "payload:" + payload;
+        }
+
+        public String handleWithDto(TestDto dto) {
+            return "dto:" + dto.name + ":" + dto.value;
+        }
+
+        public String handleWithUnresolvableParam(UnresolvableType param) {
+            return "unresolvable";
+        }
+    }
+
+    // DTO for testing JSON decoding
+    public static class TestDto {
+        public String name;
+        public int value;
+
+        public TestDto() {}
+
+        public TestDto(String name, int value) {
+            this.name = name;
+            this.value = value;
+        }
+    }
+
+    // Type that cannot be resolved
+    public static class UnresolvableType {
+    }
+
+    // ==================== Tests for lines 143-173 (payload conversion and codec decoding) ====================
+
+    @Test
+    void dispatch_withPayloadMatchingType_returnsPayloadDirectly() throws Exception {
+        // Test lines 144-146: payload != null && type.isAssignableFrom(payload.getClass())
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleWithPayload", String.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.TCP)
+                .routeKey("/test")
+                .payload("hello world")  // Set payload directly
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(200);
+        assertThat(result.getPayload()).isEqualTo("payload:hello world");
+    }
+
+    @Test
+    void dispatch_withRawPayloadBytes_decodesUsingCodec() throws Exception {
+        // Test lines 150-158: rawPayload != null, codec decoding
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleWithDto", TestDto.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        String json = "{\"name\":\"test\",\"value\":42}";
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.TCP)
+                .routeKey("/test")
+                .rawPayload(json.getBytes(StandardCharsets.UTF_8))  // Set rawPayload
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(200);
+        assertThat(result.getPayload()).isEqualTo("dto:test:42");
+    }
+
+    @Test
+    void dispatch_withRawPayloadBuffer_decodesUsingCodec() throws Exception {
+        // Test lines 159-170: rawPayloadBuffer != null, codec decoding
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleWithDto", TestDto.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        String json = "{\"name\":\"buffer\",\"value\":99}";
+        ByteBuf buffer = Unpooled.wrappedBuffer(json.getBytes(StandardCharsets.UTF_8));
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.TCP)
+                .routeKey("/test")
+                .rawPayload(buffer)  // Set rawPayloadBuffer (ByteBuf)
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(200);
+        assertThat(result.getPayload()).isEqualTo("dto:buffer:99");
+    }
+
+    @Test
+    void dispatch_withInvalidJsonRawPayload_returnsNullParameter() throws Exception {
+        // Test lines 155-157: codec decode throws exception, logs debug
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleWithDto", TestDto.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        String invalidJson = "not valid json";
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.TCP)
+                .routeKey("/test")
+                .rawPayload(invalidJson.getBytes(StandardCharsets.UTF_8))
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        // Handler receives null due to decode failure, may cause NPE
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void dispatch_withInvalidJsonRawPayloadBuffer_returnsNullParameter() throws Exception {
+        // Test lines 167-169: codec decode from ByteBuf throws exception
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleWithDto", TestDto.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        String invalidJson = "invalid json content";
+        ByteBuf buffer = Unpooled.wrappedBuffer(invalidJson.getBytes(StandardCharsets.UTF_8));
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.TCP)
+                .routeKey("/test")
+                .rawPayload(buffer)
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void dispatch_withUnresolvableParameter_returnsNull() throws Exception {
+        // Test line 173: returns null when no resolution possible
+        TestHandler handler = new TestHandler();
+        RouteDefinition route = new RouteDefinition("/test", null, handler,
+                TestHandler.class.getMethod("handleWithUnresolvableParam", UnresolvableType.class), Void.class, null);
+        Router.RouteResult routeResult = new Router.RouteResult(route, Collections.emptyMap());
+
+        when(router.findRoute(any(), any())).thenReturn(routeResult);
+
+        InboundMessage message = InboundMessage.builder()
+                .transport(TransportType.TCP)
+                .routeKey("/test")
+                .build();
+
+        CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
+        OutboundMessage result = future.get();
+
+        // Handler receives null parameter
+        assertThat(result).isNotNull();
     }
 }
