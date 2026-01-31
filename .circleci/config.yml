@@ -34,7 +34,11 @@ jobs:
     steps:
       - checkout  # Fetch repository code
       - run:
-          name: Check Java version
+          name: Install Maven
+          command: |
+            brew install maven
+      - run:
+          name: Check Java and Maven version
           command: |
             java -version
             mvn -version
