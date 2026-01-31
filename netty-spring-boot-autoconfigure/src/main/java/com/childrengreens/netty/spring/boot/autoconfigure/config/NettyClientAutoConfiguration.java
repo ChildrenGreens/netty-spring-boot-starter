@@ -107,12 +107,14 @@ public class NettyClientAutoConfiguration {
     /**
      * Create the client proxy factory.
      * @param orchestrator the client orchestrator
+     * @param codecRegistry the codec registry for ObjectMapper configuration
      * @return the client proxy factory
      */
     @Bean
     @ConditionalOnMissingBean
-    public ClientProxyFactory clientProxyFactory(NettyClientOrchestrator orchestrator) {
-        return new ClientProxyFactory(orchestrator);
+    public ClientProxyFactory clientProxyFactory(NettyClientOrchestrator orchestrator,
+                                                  CodecRegistry codecRegistry) {
+        return new ClientProxyFactory(orchestrator, codecRegistry);
     }
 
 }

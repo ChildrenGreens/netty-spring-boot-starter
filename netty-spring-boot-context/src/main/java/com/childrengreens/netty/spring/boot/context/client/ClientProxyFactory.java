@@ -19,6 +19,9 @@ package com.childrengreens.netty.spring.boot.context.client;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyRequest;
 import com.childrengreens.netty.spring.boot.context.annotation.Param;
+import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
+import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
+import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -38,6 +41,11 @@ import java.util.concurrent.CompletableFuture;
  * <p>This factory generates JDK dynamic proxies that translate method calls
  * into network requests using the configured client runtime.
  *
+ * <p>The factory uses the ObjectMapper from the {@link JsonNettyCodec} registered
+ * in the {@link CodecRegistry} to ensure consistent serialization/deserialization
+ * settings across the application. If no JsonNettyCodec is available, a default
+ * ObjectMapper is used.
+ *
  * @author ChildrenGreens
  * @since 0.0.1
  * @see NettyClient
@@ -46,23 +54,52 @@ import java.util.concurrent.CompletableFuture;
 public class ClientProxyFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(ClientProxyFactory.class);
-    private static final ObjectMapper OBJECT_MAPPER = createDefaultObjectMapper();
 
     private final NettyClientOrchestrator orchestrator;
+    private final ObjectMapper objectMapper;
+
+    /**
+     * Create a new ClientProxyFactory with a default ObjectMapper.
+     * @param orchestrator the client orchestrator
+     * @deprecated since 0.0.2, use {@link #ClientProxyFactory(NettyClientOrchestrator, CodecRegistry)} instead
+     *             to ensure consistent ObjectMapper configuration with the codec.
+     */
+    @Deprecated(since = "0.0.2")
+    public ClientProxyFactory(NettyClientOrchestrator orchestrator) {
+        this(orchestrator, null);
+    }
+
+    /**
+     * Create a new ClientProxyFactory.
+     * @param orchestrator the client orchestrator
+     * @param codecRegistry the codec registry to obtain ObjectMapper from (may be null)
+     * @since 0.0.2
+     */
+    public ClientProxyFactory(NettyClientOrchestrator orchestrator, CodecRegistry codecRegistry) {
+        this.orchestrator = orchestrator;
+        this.objectMapper = resolveObjectMapper(codecRegistry);
+    }
+
+    /**
+     * Resolve the ObjectMapper from the CodecRegistry or create a default one.
+     */
+    private static ObjectMapper resolveObjectMapper(CodecRegistry codecRegistry) {
+        if (codecRegistry != null) {
+            NettyCodec codec = codecRegistry.getCodec(JsonNettyCodec.NAME);
+            if (codec instanceof JsonNettyCodec jsonCodec) {
+                logger.debug("Using ObjectMapper from JsonNettyCodec in CodecRegistry");
+                return jsonCodec.getObjectMapper();
+            }
+        }
+        logger.debug("Using default ObjectMapper (no JsonNettyCodec found in CodecRegistry)");
+        return createDefaultObjectMapper();
+    }
 
     private static ObjectMapper createDefaultObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         return mapper;
-    }
-
-    /**
-     * Create a new ClientProxyFactory.
-     * @param orchestrator the client orchestrator
-     */
-    public ClientProxyFactory(NettyClientOrchestrator orchestrator) {
-        this.orchestrator = orchestrator;
     }
 
     /**
@@ -253,8 +290,8 @@ public class ClientProxyFactory {
             }
 
             try {
-                TypeFactory typeFactory = OBJECT_MAPPER.getTypeFactory();
-                return OBJECT_MAPPER.convertValue(result, typeFactory.constructType(targetType));
+                TypeFactory typeFactory = objectMapper.getTypeFactory();
+                return objectMapper.convertValue(result, typeFactory.constructType(targetType));
             } catch (IllegalArgumentException e) {
                 logger.debug("Failed to convert result {} to type {}", result.getClass().getName(), targetType, e);
             }

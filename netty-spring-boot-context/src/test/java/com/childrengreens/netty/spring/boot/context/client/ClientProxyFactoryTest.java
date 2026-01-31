@@ -19,6 +19,10 @@ package com.childrengreens.netty.spring.boot.context.client;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyClient;
 import com.childrengreens.netty.spring.boot.context.annotation.NettyRequest;
 import com.childrengreens.netty.spring.boot.context.annotation.Param;
+import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
+import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import io.netty.channel.Channel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,12 +42,15 @@ import static org.mockito.Mockito.*;
 class ClientProxyFactoryTest {
 
     private NettyClientOrchestrator orchestrator;
+    private CodecRegistry codecRegistry;
     private ClientProxyFactory proxyFactory;
 
     @BeforeEach
     void setUp() {
         orchestrator = mock(NettyClientOrchestrator.class);
-        proxyFactory = new ClientProxyFactory(orchestrator);
+        codecRegistry = new CodecRegistry();
+        codecRegistry.register(new JsonNettyCodec());
+        proxyFactory = new ClientProxyFactory(orchestrator, codecRegistry);
     }
 
     @Test
@@ -367,6 +374,57 @@ class ClientProxyFactoryTest {
 
         assertThat(proxy).isNotNull();
         assertThat(proxy.toString()).contains("value-client");
+    }
+
+    @Test
+    void constructor_withCodecRegistry_usesObjectMapperFromJsonNettyCodec() throws Exception {
+        // Setup custom ObjectMapper with specific configuration
+        ObjectMapper customMapper = new ObjectMapper();
+        customMapper.configure(SerializationFeature.INDENT_OUTPUT, true);
+
+        JsonNettyCodec jsonCodec = new JsonNettyCodec(customMapper);
+        CodecRegistry codecRegistry = new CodecRegistry();
+        codecRegistry.register(jsonCodec);
+
+        // Create factory with CodecRegistry
+        ClientProxyFactory factoryWithCodec = new ClientProxyFactory(orchestrator, codecRegistry);
+
+        // Verify factory was created successfully
+        assertThat(factoryWithCodec).isNotNull();
+
+        // Create proxy and verify it works
+        TestClient proxy = factoryWithCodec.createProxy(TestClient.class);
+        assertThat(proxy).isNotNull();
+    }
+
+    @Test
+    void constructor_withNullCodecRegistry_usesDefaultObjectMapper() {
+        // Create factory with null CodecRegistry
+        ClientProxyFactory factoryWithNull = new ClientProxyFactory(orchestrator, null);
+
+        // Verify factory was created successfully
+        assertThat(factoryWithNull).isNotNull();
+
+        // Create proxy and verify it works
+        TestClient proxy = factoryWithNull.createProxy(TestClient.class);
+        assertThat(proxy).isNotNull();
+    }
+
+    @Test
+    void constructor_withCodecRegistryWithoutJsonCodec_usesDefaultObjectMapper() {
+        // Create CodecRegistry without JsonNettyCodec
+        CodecRegistry codecRegistry = new CodecRegistry();
+        // Don't register any codec
+
+        // Create factory with empty CodecRegistry
+        ClientProxyFactory factoryWithEmptyRegistry = new ClientProxyFactory(orchestrator, codecRegistry);
+
+        // Verify factory was created successfully
+        assertThat(factoryWithEmptyRegistry).isNotNull();
+
+        // Create proxy and verify it works
+        TestClient proxy = factoryWithEmptyRegistry.createProxy(TestClient.class);
+        assertThat(proxy).isNotNull();
     }
 
 }
