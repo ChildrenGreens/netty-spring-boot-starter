@@ -364,6 +364,103 @@ class RouterTest {
                 .hasMessageContaining("Duplicate route registration");
     }
 
+    @Test
+    void concurrentRegister_sameRoute_onlyOneSucceeds() throws Exception {
+        // Test that concurrent registration of the same route is handled atomically
+        // Only one registration should succeed, others should throw
+        Method method = TestController.class.getMethod("handleGet");
+        TestController controller = new TestController();
+
+        int numThreads = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(numThreads);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger duplicateCount = new AtomicInteger(0);
+
+        // All threads try to register the exact same route
+        for (int t = 0; t < numThreads; t++) {
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+
+                    RouteDefinition route = new RouteDefinition("/api/concurrent/test", "GET",
+                            controller, method, Void.class, "testServer");
+                    router.register(route);
+                    successCount.incrementAndGet();
+                } catch (IllegalStateException e) {
+                    // Expected for duplicate registrations
+                    if (e.getMessage().contains("Duplicate route registration")) {
+                        duplicateCount.incrementAndGet();
+                    }
+                } catch (Exception e) {
+                    // Unexpected exception
+                    e.printStackTrace();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+        boolean completed = doneLatch.await(30, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(completed).isTrue();
+        // Exactly one thread should succeed
+        assertThat(successCount.get()).isEqualTo(1);
+        // All other threads should get duplicate exception
+        assertThat(duplicateCount.get()).isEqualTo(numThreads - 1);
+    }
+
+    @Test
+    void concurrentRegister_samePatternRoute_onlyOneSucceeds() throws Exception {
+        // Test that concurrent registration of the same pattern route is handled atomically
+        Method method = TestController.class.getMethod("handleGet");
+        TestController controller = new TestController();
+
+        int numThreads = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(numThreads);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger duplicateCount = new AtomicInteger(0);
+
+        // All threads try to register the exact same pattern route
+        for (int t = 0; t < numThreads; t++) {
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+
+                    RouteDefinition route = new RouteDefinition("/api/concurrent/{id}", "GET",
+                            controller, method, Void.class, "testServer");
+                    router.register(route);
+                    successCount.incrementAndGet();
+                } catch (IllegalStateException e) {
+                    // Expected for duplicate registrations
+                    if (e.getMessage().contains("Duplicate route registration")) {
+                        duplicateCount.incrementAndGet();
+                    }
+                } catch (Exception e) {
+                    // Unexpected exception
+                    e.printStackTrace();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+        boolean completed = doneLatch.await(30, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(completed).isTrue();
+        // Exactly one thread should succeed
+        assertThat(successCount.get()).isEqualTo(1);
+        // All other threads should get duplicate exception
+        assertThat(duplicateCount.get()).isEqualTo(numThreads - 1);
+    }
+
     // Test controller class
     public static class TestController {
         public String handleGet() {

@@ -20,12 +20,16 @@ import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.handler.timeout.WriteTimeoutException;
@@ -42,7 +46,15 @@ import java.nio.charset.StandardCharsets;
  * handles them appropriately based on the protocol type.
  *
  * <p>The handler determines the protocol type from the channel attribute
- * {@link NettyContext#PROTOCOL_TYPE_KEY} and sends the appropriate error response:
+ * {@link NettyContext#PROTOCOL_TYPE_KEY}. If not set, it automatically detects
+ * the protocol by inspecting the pipeline for known handlers:
+ * <ul>
+ * <li>WebSocketServerProtocolHandler → WEBSOCKET</li>
+ * <li>HttpServerCodec/HttpRequestDecoder/HttpResponseEncoder → HTTP</li>
+ * <li>Otherwise → TCP</li>
+ * </ul>
+ *
+ * <p>Based on the protocol type, it sends the appropriate error response:
  * <ul>
  * <li>HTTP - Sends HTTP 500 response with JSON error body</li>
  * <li>WebSocket - Sends close frame with error reason</li>
@@ -61,6 +73,11 @@ public class ExceptionHandler extends ChannelDuplexHandler {
         String protocolType = null;
         if (ctx.channel().hasAttr(NettyContext.PROTOCOL_TYPE_KEY)) {
             protocolType = ctx.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).get();
+        }
+
+        // Detect protocol from pipeline if not set
+        if (protocolType == null) {
+            protocolType = detectProtocolFromPipeline(ctx.pipeline());
         }
 
         // Log based on exception type
@@ -87,8 +104,7 @@ public class ExceptionHandler extends ChannelDuplexHandler {
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        if (evt instanceof IdleStateEvent) {
-            IdleStateEvent event = (IdleStateEvent) evt;
+        if (evt instanceof IdleStateEvent event) {
             logger.debug("Idle state event: {} for channel: {}", event.state(), ctx.channel().remoteAddress());
             ctx.close();
         } else {
@@ -100,10 +116,6 @@ public class ExceptionHandler extends ChannelDuplexHandler {
      * Send appropriate error response based on protocol type.
      */
     private void sendErrorResponse(ChannelHandlerContext ctx, Throwable cause, String protocolType) {
-        if (protocolType == null) {
-            protocolType = NettyContext.PROTOCOL_TCP;
-        }
-
         try {
             switch (protocolType) {
                 case NettyContext.PROTOCOL_HTTP -> sendHttpErrorResponse(ctx, cause);
@@ -217,6 +229,44 @@ public class ExceptionHandler extends ChannelDuplexHandler {
                    .replace("\n", "\\n")
                    .replace("\r", "\\r")
                    .replace("\t", "\\t");
+    }
+
+    /**
+     * Detect protocol type from pipeline handlers when PROTOCOL_TYPE_KEY is not set.
+     *
+     * <p>This method inspects the pipeline to detect the protocol type based on
+     * the presence of known handlers:
+     * <ul>
+     * <li>WebSocketServerProtocolHandler → WEBSOCKET</li>
+     * <li>HttpServerCodec or HttpRequestDecoder or HttpResponseEncoder → HTTP</li>
+     * <li>Otherwise → TCP (default)</li>
+     * </ul>
+     *
+     * @param pipeline the channel pipeline to inspect
+     * @return the detected protocol type
+     */
+    private String detectProtocolFromPipeline(ChannelPipeline pipeline) {
+        // Check for WebSocket first (WebSocket pipeline usually also has HTTP handlers)
+        for (ChannelHandler handler : pipeline.toMap().values()) {
+            if (handler instanceof WebSocketServerProtocolHandler) {
+                logger.debug("Detected WebSocket protocol from pipeline handler");
+                return NettyContext.PROTOCOL_WEBSOCKET;
+            }
+        }
+
+        // Check for HTTP handlers
+        for (ChannelHandler handler : pipeline.toMap().values()) {
+            if (handler instanceof HttpServerCodec ||
+                    handler.getClass().getSimpleName().equals("HttpRequestDecoder") ||
+                    handler.getClass().getSimpleName().equals("HttpResponseEncoder")) {
+                logger.debug("Detected HTTP protocol from pipeline handler");
+                return NettyContext.PROTOCOL_HTTP;
+            }
+        }
+
+        // Default to TCP
+        logger.debug("No HTTP/WebSocket handlers found, defaulting to TCP protocol");
+        return NettyContext.PROTOCOL_TCP;
     }
 
 }

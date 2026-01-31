@@ -20,7 +20,10 @@ import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.Attribute;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +31,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,6 +47,7 @@ class ExceptionHandlerTest {
     private ChannelHandlerContext ctx;
     private Channel channel;
     private ChannelFuture channelFuture;
+    private ChannelPipeline pipeline;
 
     @BeforeEach
     void setUp() {
@@ -49,11 +55,15 @@ class ExceptionHandlerTest {
         ctx = mock(ChannelHandlerContext.class);
         channel = mock(Channel.class);
         channelFuture = mock(ChannelFuture.class);
+        pipeline = mock(ChannelPipeline.class);
         when(ctx.channel()).thenReturn(channel);
+        when(ctx.pipeline()).thenReturn(pipeline);
         when(ctx.writeAndFlush(any())).thenReturn(channelFuture);
         when(channelFuture.addListener(any())).thenReturn(channelFuture);
         // Default: no protocol type attribute set
         when(channel.hasAttr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(false);
+        // Default: empty pipeline for protocol detection
+        when(pipeline.toMap()).thenReturn(new LinkedHashMap<>());
     }
 
     @Test
@@ -83,7 +93,7 @@ class ExceptionHandlerTest {
         // Verify CloseWebSocketFrame sent
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(ctx).writeAndFlush(captor.capture());
-        assertTrue(captor.getValue() instanceof CloseWebSocketFrame);
+        assertInstanceOf(CloseWebSocketFrame.class, captor.getValue());
 
         // Verify close listener added
         verify(channelFuture).addListener(any());
@@ -229,5 +239,86 @@ class ExceptionHandlerTest {
         Attribute<String> attr = mock(Attribute.class);
         when(channel.attr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(attr);
         when(attr.get()).thenReturn(protocolType);
+    }
+
+    // ==================== Protocol Detection Tests ====================
+
+    @Test
+    void exceptionCaught_withNoProtocolAttribute_detectsHttpFromHttpServerCodec() {
+        // No protocol type attribute set
+        when(channel.hasAttr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(false);
+        when(channel.isActive()).thenReturn(true);
+        when(ctx.alloc()).thenReturn(io.netty.buffer.UnpooledByteBufAllocator.DEFAULT);
+
+        // Set up pipeline with HttpServerCodec (real instance)
+        Map<String, io.netty.channel.ChannelHandler> handlers = new LinkedHashMap<>();
+        handlers.put("httpCodec", new HttpServerCodec());
+        when(pipeline.toMap()).thenReturn(handlers);
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // Should send HTTP response (detected from pipeline)
+        verify(ctx).writeAndFlush(any());
+        verify(channelFuture).addListener(any());
+        // HTTP closes via listener, not directly
+        verify(ctx, never()).close();
+    }
+
+    @Test
+    void exceptionCaught_withNoProtocolAttribute_detectsWebSocketFromWebSocketHandler() {
+        // No protocol type attribute set
+        when(channel.hasAttr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(false);
+        when(channel.isActive()).thenReturn(true);
+
+        // Set up pipeline with both HTTP and WebSocket handlers
+        // WebSocket should take precedence
+        Map<String, io.netty.channel.ChannelHandler> handlers = new LinkedHashMap<>();
+        handlers.put("httpCodec", new HttpServerCodec());
+        handlers.put("wsHandler", new WebSocketServerProtocolHandler("/ws"));
+        when(pipeline.toMap()).thenReturn(handlers);
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // Should send WebSocket close frame (detected from pipeline)
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(ctx).writeAndFlush(captor.capture());
+        assertInstanceOf(CloseWebSocketFrame.class, captor.getValue());
+    }
+
+    @Test
+    void exceptionCaught_withNoProtocolAttribute_defaultsToTcpWhenNoPipelineHandlers() {
+        // No protocol type attribute set
+        when(channel.hasAttr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(false);
+        when(channel.isActive()).thenReturn(true);
+
+        // Empty pipeline - no HTTP or WebSocket handlers
+        when(pipeline.toMap()).thenReturn(new LinkedHashMap<>());
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // Should default to TCP behavior (no response sent)
+        verify(ctx, never()).writeAndFlush(any());
+        // TCP doesn't close for recoverable errors
+        verify(ctx, never()).close();
+    }
+
+    @Test
+    void exceptionCaught_withNoProtocolAttribute_closesConnectionForHttpDetected() {
+        // No protocol type attribute set
+        when(channel.hasAttr(NettyContext.PROTOCOL_TYPE_KEY)).thenReturn(false);
+        when(channel.isActive()).thenReturn(true);
+        when(ctx.alloc()).thenReturn(io.netty.buffer.UnpooledByteBufAllocator.DEFAULT);
+
+        // Set up pipeline with HttpServerCodec (real instance)
+        Map<String, io.netty.channel.ChannelHandler> handlers = new LinkedHashMap<>();
+        handlers.put("httpCodec", new HttpServerCodec());
+        when(pipeline.toMap()).thenReturn(handlers);
+
+        handler.exceptionCaught(ctx, new RuntimeException("Test error"));
+
+        // HTTP should close connection after sending response (via listener)
+        verify(channelFuture).addListener(any());
+        // Not closed directly for HTTP
+        verify(ctx, never()).close();
     }
 }

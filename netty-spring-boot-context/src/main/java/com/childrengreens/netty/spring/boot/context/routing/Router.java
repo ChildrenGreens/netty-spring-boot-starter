@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -65,39 +66,51 @@ public class Router {
     private final List<PatternRoute> patternRoutes = new CopyOnWriteArrayList<>();
 
     /**
+     * Lock for ensuring atomic check-then-add operations during route registration.
+     */
+    private final ReentrantLock registrationLock = new ReentrantLock();
+
+    /**
      * Register a route definition.
+     * <p>This method is thread-safe and ensures atomic duplicate detection and registration.
      * @param route the route to register
+     * @throws IllegalStateException if a duplicate route is detected
      */
     public void register(RouteDefinition route) {
         String key = buildRouteKey(route.getRouteKey(), route.getHttpMethod());
 
-        if (containsPathVariable(route.getRouteKey())) {
-            // Register as pattern route
-            Pattern pattern = compilePathPattern(route.getRouteKey());
-            // Check for duplicate pattern route (routeKey + httpMethod + serverName)
-            for (PatternRoute existing : patternRoutes) {
-                if (existing.route.getRouteKey().equals(route.getRouteKey())
-                        && equalsHttpMethod(existing.route.getHttpMethod(), route.getHttpMethod())
-                        && equalsServerName(existing.route.getServerName(), route.getServerName())) {
-                    throw new IllegalStateException("Duplicate route registration: " + key
-                            + " (server=" + normalizeServerName(route.getServerName()) + ")");
+        registrationLock.lock();
+        try {
+            if (containsPathVariable(route.getRouteKey())) {
+                // Register as pattern route
+                Pattern pattern = compilePathPattern(route.getRouteKey());
+                // Check for duplicate pattern route (routeKey + httpMethod + serverName)
+                for (PatternRoute existing : patternRoutes) {
+                    if (existing.route.getRouteKey().equals(route.getRouteKey())
+                            && equalsHttpMethod(existing.route.getHttpMethod(), route.getHttpMethod())
+                            && equalsServerName(existing.route.getServerName(), route.getServerName())) {
+                        throw new IllegalStateException("Duplicate route registration: " + key
+                                + " (server=" + normalizeServerName(route.getServerName()) + ")");
+                    }
                 }
-            }
-            patternRoutes.add(new PatternRoute(pattern, route));
-            logger.debug("Registered pattern route: {} -> {}", route.getRouteKey(), route.getMethod());
-        } else {
-            // Register as exact route
-            // Use CopyOnWriteArrayList for thread-safe iteration
-            CopyOnWriteArrayList<RouteDefinition> routes =
-                    exactRoutes.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>());
-            for (RouteDefinition existing : routes) {
-                if (equalsServerName(existing.getServerName(), route.getServerName())) {
-                    throw new IllegalStateException("Duplicate route registration: " + key
-                            + " (server=" + normalizeServerName(route.getServerName()) + ")");
+                patternRoutes.add(new PatternRoute(pattern, route));
+                logger.debug("Registered pattern route: {} -> {}", route.getRouteKey(), route.getMethod());
+            } else {
+                // Register as exact route
+                // Use CopyOnWriteArrayList for thread-safe iteration
+                CopyOnWriteArrayList<RouteDefinition> routes =
+                        exactRoutes.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>());
+                for (RouteDefinition existing : routes) {
+                    if (equalsServerName(existing.getServerName(), route.getServerName())) {
+                        throw new IllegalStateException("Duplicate route registration: " + key
+                                + " (server=" + normalizeServerName(route.getServerName()) + ")");
+                    }
                 }
+                routes.add(route);
+                logger.debug("Registered exact route: {} -> {}", key, route.getMethod());
             }
-            routes.add(route);
-            logger.debug("Registered exact route: {} -> {}", key, route.getMethod());
+        } finally {
+            registrationLock.unlock();
         }
     }
 
