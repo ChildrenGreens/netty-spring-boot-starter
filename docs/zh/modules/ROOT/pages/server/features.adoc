@@ -1,0 +1,122 @@
+= 特性
+:page-pagination:
+
+特性 (Feature) 是可选的 Pipeline 组件，提供 SSL 加密、速率限制、空闲检测等横切功能。
+
+== 内置特性
+
+[cols="2,1,3"]
+|===
+|特性 |顺序 |描述
+
+|`ssl`
+|10
+|SSL/TLS 加密通信
+
+|`connectionLimit`
+|10
+|限制最大并发连接数
+
+|`logging`
+|50
+|记录所有入站/出站流量
+
+|`rateLimit`
+|50
+|每连接令牌桶速率限制
+
+|`idle`
+|150
+|检测并关闭空闲连接
+|===
+
+== SSL/TLS 特性
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: secure-server
+        features:
+          ssl:
+            enabled: true
+            certPath: /etc/ssl/server.crt
+            keyPath: /etc/ssl/server.key
+----
+
+== 连接限制特性
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          connectionLimit:
+            enabled: true
+            maxConnections: 10000
+----
+
+== 速率限制特性
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: api-server
+        features:
+          rateLimit:
+            enabled: true
+            requestsPerSecond: 100
+            burstSize: 150
+----
+
+== 空闲检测特性
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        features:
+          idle:
+            enabled: true
+            readSeconds: 60
+            writeSeconds: 30
+            allSeconds: 0
+----
+
+== 自定义特性
+
+实现 `FeatureProvider` 接口创建自定义特性：
+
+[source,java]
+----
+@Component
+public class IpWhitelistFeatureProvider implements FeatureProvider {
+
+    @Override
+    public String getName() {
+        return "ipWhitelist";
+    }
+
+    @Override
+    public int getOrder() {
+        return 5;  // 在 SSL 之前
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        // 检查配置
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 添加 IP 过滤处理器
+    }
+}
+----

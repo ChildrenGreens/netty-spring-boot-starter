@@ -15,13 +15,13 @@ When `spring-boot-actuator` is on the classpath, Netty Spring Boot Starter provi
 |`GET /actuator/netty/servers`
 |List all server details
 
-|`GET /actuator/netty/servers/{name}`
+|`GET /actuator/netty/servers/\{name\}`
 |Get specific server info
 
 |`GET /actuator/netty/clients`
 |List all client details
 
-|`GET /actuator/netty/clients/{name}`
+|`GET /actuator/netty/clients/\{name\}`
 |Get specific client info
 
 |`GET /actuator/health/netty`

@@ -1,0 +1,11 @@
+name: netty-spring-boot-zh
+title: Netty Spring Boot Starter (中文)
+version: '0.0.1'
+nav:
+  - modules/ROOT/nav.adoc
+asciidoc:
+  attributes:
+    project-version: '0.0.1'
+    spring-boot-version: '3.5.10'
+    java-version: '17'
+    lang: zh

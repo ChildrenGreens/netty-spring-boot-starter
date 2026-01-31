@@ -1,0 +1,79 @@
+= 快速开始
+:page-pagination:
+
+本指南帮助你在 5 分钟内创建一个 Netty 服务端和客户端应用。
+
+== 前置要求
+
+* Java 17+
+* Maven 3.6+ 或 Gradle 7+
+* Spring Boot 3.x
+
+== 步骤 1: 添加依赖
+
+[source,xml]
+----
+<dependency>
+    <groupId>com.childrengreens</groupId>
+    <artifactId>netty-spring-boot-starter</artifactId>
+    <version>{project-version}</version>
+</dependency>
+----
+
+== 步骤 2: 配置服务端
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server
+        transport: TCP
+        port: 9000
+        profile: tcp-lengthfield-json
+        routing:
+          mode: MESSAGE_TYPE
+----
+
+== 步骤 3: 创建消息处理器
+
+[source,java]
+----
+@NettyMessageController
+public class MessageHandler {
+
+    @NettyMessageMapping("ping")
+    public Map<String, Object> handlePing() {
+        return Map.of("type", "pong", "time", System.currentTimeMillis());
+    }
+}
+----
+
+== 步骤 4: 启动应用
+
+[source,java]
+----
+@SpringBootApplication
+@EnableNettyServers
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+----
+
+== 步骤 5: 测试
+
+使用 `telnet` 或编写客户端测试：
+
+[source,bash]
+----
+# 发送 JSON 消息 (需要 4 字节长度前缀)
+echo -ne '\x00\x00\x00\x0f{"type":"ping"}' | nc localhost 9000
+----
+
+== 下一步
+
+* xref:configuration.adoc[配置] - 完整配置选项
+* xref:server/handlers.adoc[处理器] - 处理器详解
+* xref:client/usage.adoc[客户端] - 声明式客户端

@@ -1,5 +1,4 @@
 = Netty Spring Boot Starter
-:page-layout: home
 
 A comprehensive Spring Boot starter for building high-performance network applications with Netty. Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and annotation-based routing.
 
@@ -176,3 +175,7 @@ netty-spring-boot/
 == License
 
 This project is licensed under the https://www.apache.org/licenses/LICENSE-2.0[Apache License 2.0].
+
+== Language
+
+* link:../netty-spring-boot-zh/index.html[中文]

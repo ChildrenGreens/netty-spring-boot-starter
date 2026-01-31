@@ -1,0 +1,136 @@
+= 客户端使用
+:page-pagination:
+
+Netty Spring Boot Starter 提供类似 Spring Cloud OpenFeign 的声明式客户端接口。
+
+== 快速开始
+
+=== 步骤 1: 添加客户端配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service
+        host: 127.0.0.1
+        port: 9000
+        profile: tcp-lengthfield-json
+        timeout:
+          connectMs: 5000
+          requestMs: 10000
+----
+
+=== 步骤 2: 定义客户端接口
+
+[source,java]
+----
+@NettyClient(name = "order-service")
+public interface OrderClient {
+
+    @NettyRequest(type = "ping")
+    PongResponse ping();
+
+    @NettyRequest(type = "order.create", timeout = 5000)
+    OrderResponse createOrder(OrderRequest request);
+
+    @NettyRequest(type = "order.query")
+    CompletableFuture<OrderResponse> queryOrderAsync(@Param("orderId") String orderId);
+
+    @NettyRequest(value = "notify", oneWay = true)
+    void notifyUser(@Param("userId") Long userId, @Param("message") String message);
+}
+----
+
+=== 步骤 3: 启用客户端扫描
+
+[source,java]
+----
+@SpringBootApplication
+@EnableNettyClients(basePackages = "com.example.client")
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+----
+
+=== 步骤 4: 注入并使用
+
+[source,java]
+----
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderClient orderClient;
+
+    public void process() {
+        // 同步调用
+        PongResponse pong = orderClient.ping();
+
+        // 异步调用
+        orderClient.queryOrderAsync("order-456")
+                .thenAccept(order -> System.out.println("Order: " + order));
+
+        // 单向调用
+        orderClient.notifyUser(123L, "Your order is ready!");
+    }
+}
+----
+
+== 客户端注解
+
+=== @NettyClient
+
+标记接口为 Netty 客户端：
+
+[source,java]
+----
+@NettyClient(name = "order-service")
+public interface OrderClient {
+    // ...
+}
+----
+
+=== @NettyRequest
+
+标记方法为请求：
+
+[source,java]
+----
+@NettyRequest(
+    type = "user.get",      // 消息类型 (必填)
+    timeout = 5000,         // 超时毫秒 (可选)
+    oneWay = false          // 是否单向 (可选)
+)
+User getUser(Long id);
+----
+
+=== @Param
+
+绑定方法参数到命名字段：
+
+[source,java]
+----
+@NettyRequest("user.search")
+List<User> searchUsers(
+    @Param("name") String name,
+    @Param("age") Integer age
+);
+
+// 发送: {"type":"user.search","name":"John","age":25}
+----
+
+== 错误处理
+
+[source,java]
+----
+try {
+    User user = userClient.getUser(999L);
+} catch (TimeoutException e) {
+    log.warn("请求超时");
+} catch (ConnectionException e) {
+    log.error("连接失败: {}", e.getMessage());
+}
+----

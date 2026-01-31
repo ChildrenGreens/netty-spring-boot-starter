@@ -10,3 +10,7 @@
 ** xref:client/connection-pool.adoc[Connection Pool]
 * xref:extension.adoc[Extension Points]
 * xref:actuator.adoc[Actuator Integration]
+* Source Code Analysis
+** xref:source/server-pipeline.adoc[Server Pipeline]
+** xref:source/client-pipeline.adoc[Client Pipeline]
+** xref:source/client-orchestrator.adoc[Client Orchestrator]

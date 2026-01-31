@@ -1,0 +1,641 @@
+= Server Pipeline Source Analysis
+:page-pagination:
+
+This document provides a deep dive into the server-side pipeline assembly mechanism. Understanding this code helps you extend the framework effectively.
+
+== Architecture Overview
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              PipelineAssembler                                           │
+│                                                                                          │
+│  Dependencies:                                                                           │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────────┐  │
+│  │ ProfileRegistry │  │ FeatureRegistry │  │   Dispatcher    │  │   CodecRegistry   │  │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  └─────────┬─────────┘  │
+│           │                    │                    │                      │            │
+│           └────────────────────┼────────────────────┼──────────────────────┘            │
+│                                │                    │                                    │
+│                                ▼                    ▼                                    │
+│                    ┌───────────────────────────────────────────┐                        │
+│                    │         assemble(pipeline, serverSpec)    │                        │
+│                    └───────────────────────────────────────────┘                        │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Core Class: PipelineAssembler
+
+The `PipelineAssembler` is the central coordinator for building server pipelines. It combines profiles, features, and custom configurers into a complete handler chain.
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/pipeline/PipelineAssembler.java
+----
+
+=== Class Definition
+
+[source,java]
+----
+public class PipelineAssembler {
+
+    private final ProfileRegistry profileRegistry;      // Profile registry
+    private final FeatureRegistry featureRegistry;      // Feature registry
+    private final Dispatcher dispatcher;                // Message dispatcher
+    private final CodecRegistry codecRegistry;          // Codec registry
+    private final List<NettyPipelineConfigurer> configurers;  // Custom configurers
+
+    public PipelineAssembler(ProfileRegistry profileRegistry,
+                              FeatureRegistry featureRegistry,
+                              Dispatcher dispatcher,
+                              CodecRegistry codecRegistry,
+                              List<NettyPipelineConfigurer> configurers) {
+        this.profileRegistry = profileRegistry;
+        this.featureRegistry = featureRegistry;
+        this.dispatcher = dispatcher;
+        this.codecRegistry = codecRegistry;
+        this.configurers = new ArrayList<>(configurers);
+        // Sort configurers by order
+        this.configurers.sort(Comparator.comparingInt(NettyPipelineConfigurer::getOrder));
+    }
+}
+----
+
+=== The assemble() Method
+
+This is the core method that builds the complete pipeline:
+
+[source,java]
+----
+public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec) {
+    // Get profile by name
+    String profileName = serverSpec.getProfile();
+    Profile profile = profileRegistry.getRequiredProfile(profileName);
+
+    // Step 0: Set protocol type attribute for ExceptionHandler
+    String protocolType = profile.getProtocolType();
+    pipeline.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).set(protocolType);
+
+    // Step 1: Apply features with order [0, 200) - SSL, ConnectionLimit, Logging, RateLimit
+    applyFeatures(pipeline, serverSpec, 0, 200);
+
+    // Step 2: Apply profile - Framing, base codec
+    profile.configure(pipeline, serverSpec);
+
+    // Step 3: Apply features with order [200, MAX) - Business features
+    applyFeatures(pipeline, serverSpec, 200, Integer.MAX_VALUE);
+
+    // Step 4: Add dispatcher handler (if profile supports it)
+    if (profile.supportsDispatcher()) {
+        pipeline.addLast("dispatcherHandler",
+                new DispatcherHandler(dispatcher, serverSpec, codecRegistry));
+    }
+
+    // Step 5: Add exception handler
+    pipeline.addLast("exceptionHandler", new ExceptionHandler());
+
+    // Step 6: Apply custom configurers
+    for (NettyPipelineConfigurer configurer : configurers) {
+        if (configurer.supports(serverSpec)) {
+            configurer.configure(pipeline, serverSpec);
+        }
+    }
+}
+----
+
+=== Feature Application Logic
+
+Features are applied based on their order value:
+
+[source,java]
+----
+private void applyFeatures(ChannelPipeline pipeline, ServerSpec serverSpec,
+                           int minOrder, int maxOrder) {
+    for (FeatureProvider feature : featureRegistry.getOrderedFeatures()) {
+        int order = feature.getOrder();
+        // Only apply features within the specified order range and enabled
+        if (order >= minOrder && order < maxOrder && feature.isEnabled(serverSpec)) {
+            logger.debug("Applying feature [{}] (order={})", feature.getName(), order);
+            feature.configure(pipeline, serverSpec);
+        }
+    }
+}
+----
+
+== Pipeline Assembly Flow
+
+[source,text]
+----
+                          assemble(pipeline, serverSpec)
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 0: Set protocol type attribute                                             │
+    │          channel.attr(PROTOCOL_TYPE_KEY).set("TCP" | "HTTP" | "WEBSOCKET")      │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 1: Apply Features (order 0-199)                                            │
+    │                                                                                  │
+    │  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐   │
+    │  │ SslFeatureProvider   │  │ConnectionLimitFeature│  │ LoggingFeatureProvider│  │
+    │  │     order = 10       │  │     order = 10       │  │     order = 50        │  │
+    │  │  → sslHandler        │  │  → connLimitHandler  │  │  → loggingHandler     │  │
+    │  └──────────────────────┘  └──────────────────────┘  └──────────────────────┘   │
+    │                                                                                  │
+    │  ┌──────────────────────┐  ┌──────────────────────┐                             │
+    │  │RateLimitFeatureProvider│ │IdleFeatureProvider  │                             │
+    │  │     order = 50        │  │     order = 150     │                             │
+    │  │  → rateLimitHandler   │  │  → idleStateHandler │                             │
+    │  └──────────────────────┘  └──────────────────────┘                             │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 2: Apply Profile                                                           │
+    │                                                                                  │
+    │  Example: tcp-lengthfield-json                                                   │
+    │  ┌──────────────────────────────────────────────────────────────────┐           │
+    │  │  pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(...))     │
+    │  │  pipeline.addLast("frameEncoder", new LengthFieldPrepender(4))               │
+    │  └──────────────────────────────────────────────────────────────────┘           │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 3: Apply Features (order 200+)                                             │
+    │  (Business-level features, typically order >= 200)                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 4: Add DispatcherHandler                                                   │
+    │                                                                                  │
+    │  pipeline.addLast("dispatcherHandler", new DispatcherHandler(                   │
+    │      dispatcher,     // Message router                                           │
+    │      serverSpec,     // Server configuration                                     │
+    │      codecRegistry   // Codec registry                                           │
+    │  ))                                                                              │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 5: Add ExceptionHandler                                                    │
+    │                                                                                  │
+    │  pipeline.addLast("exceptionHandler", new ExceptionHandler())                   │
+    │  → Returns different error formats based on PROTOCOL_TYPE_KEY                    │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 6: Apply Custom Configurers                                                │
+    │                                                                                  │
+    │  for (NettyPipelineConfigurer configurer : configurers) {                       │
+    │      if (configurer.supports(serverSpec)) {                                      │
+    │          configurer.configure(pipeline, serverSpec);                            │
+    │      }                                                                           │
+    │  }                                                                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Profile Interface
+
+The `Profile` interface defines protocol stack configuration:
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/profile/Profile.java
+----
+
+=== Interface Definition
+
+[source,java]
+----
+public interface Profile {
+
+    /**
+     * Return the unique name of this profile.
+     */
+    String getName();
+
+    /**
+     * Configure the channel pipeline according to this profile.
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * Return the default codec type for this profile.
+     */
+    default String getDefaultCodec() {
+        return "json";
+    }
+
+    /**
+     * Return whether this profile supports the dispatcher handler.
+     */
+    default boolean supportsDispatcher() {
+        return true;
+    }
+
+    /**
+     * Return the protocol type for this profile.
+     * Used by ExceptionHandler to determine error response format.
+     */
+    default String getProtocolType() {
+        return NettyContext.PROTOCOL_TCP;
+    }
+}
+----
+
+=== Example Implementation: TcpLengthFieldJsonProfile
+
+[source,java]
+----
+public class TcpLengthFieldJsonProfile implements Profile {
+
+    public static final String NAME = "tcp-lengthfield-json";
+
+    private static final int MAX_FRAME_LENGTH = 1024 * 1024;  // 1MB
+    private static final int LENGTH_FIELD_OFFSET = 0;
+    private static final int LENGTH_FIELD_LENGTH = 4;          // 4-byte length prefix
+    private static final int LENGTH_ADJUSTMENT = 0;
+    private static final int INITIAL_BYTES_TO_STRIP = 4;       // Strip length field
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // Frame decoder - reads length prefix and extracts frame
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
+                MAX_FRAME_LENGTH,
+                LENGTH_FIELD_OFFSET,
+                LENGTH_FIELD_LENGTH,
+                LENGTH_ADJUSTMENT,
+                INITIAL_BYTES_TO_STRIP
+        ));
+
+        // Frame encoder - prepends length to outgoing messages
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(LENGTH_FIELD_LENGTH));
+    }
+}
+----
+
+== FeatureProvider Interface
+
+Features are composable handler suites that can be enabled/disabled independently:
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/feature/FeatureProvider.java
+----
+
+=== Interface Definition
+
+[source,java]
+----
+public interface FeatureProvider {
+
+    /**
+     * Return the unique name of this feature.
+     */
+    String getName();
+
+    /**
+     * Return the order in which this feature should be applied.
+     * Lower values are applied first. Recommended ranges:
+     *   0-100:   SSL/Transport level
+     *   100-200: Connection governance
+     *   200-300: Framing
+     *   300-400: Codec
+     *   400-500: Business
+     *   500+:    Outbound/Metrics
+     */
+    int getOrder();
+
+    /**
+     * Configure the channel pipeline with this feature's handlers.
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * Return whether this feature is enabled for the given server spec.
+     */
+    boolean isEnabled(ServerSpec serverSpec);
+}
+----
+
+=== Built-in Features
+
+[cols="2,1,3"]
+|===
+|Feature |Order |Description
+
+|`SslFeatureProvider`
+|10
+|Adds SSL/TLS handler for encrypted communication
+
+|`ConnectionLimitFeatureProvider`
+|10
+|Limits maximum concurrent connections
+
+|`LoggingFeatureProvider`
+|50
+|Logs all network traffic
+
+|`RateLimitFeatureProvider`
+|50
+|Token bucket rate limiting per connection
+
+|`IdleFeatureProvider`
+|150
+|Detects and handles idle connections
+|===
+
+=== Example Implementation: SslFeatureProvider
+
+[source,java]
+----
+public class SslFeatureProvider implements FeatureProvider {
+
+    public static final String NAME = "ssl";
+    public static final int ORDER = 10;  // First in pipeline
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        SslSpec ssl = serverSpec.getFeatures().getSsl();
+        if (ssl != null && ssl.isEnabled()) {
+            SslContext sslContext = buildSslContext(ssl);
+            pipeline.addLast("sslHandler", sslContext.newHandler(pipeline.channel().alloc()));
+        }
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        SslSpec ssl = serverSpec.getFeatures().getSsl();
+        return ssl != null && ssl.isEnabled();
+    }
+
+    private SslContext buildSslContext(SslSpec ssl) throws SSLException, CertificateException {
+        // Build SSL context from certificate and key files
+        // ...
+    }
+}
+----
+
+=== Example Implementation: IdleFeatureProvider
+
+[source,java]
+----
+public class IdleFeatureProvider implements FeatureProvider {
+
+    public static final String NAME = "idle";
+    public static final int ORDER = 150;  // After SSL, before business handlers
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        IdleSpec idle = serverSpec.getFeatures().getIdle();
+        if (idle != null && idle.isEnabled()) {
+            pipeline.addLast("idleStateHandler", new IdleStateHandler(
+                    idle.getReadSeconds(),
+                    idle.getWriteSeconds(),
+                    idle.getAllSeconds(),
+                    TimeUnit.SECONDS
+            ));
+        }
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        IdleSpec idle = serverSpec.getFeatures().getIdle();
+        return idle != null && idle.isEnabled();
+    }
+}
+----
+
+== NettyPipelineConfigurer Interface
+
+Custom extension point for user-defined pipeline customization:
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/pipeline/NettyPipelineConfigurer.java
+----
+
+=== Interface Definition
+
+[source,java]
+----
+@FunctionalInterface
+public interface NettyPipelineConfigurer {
+
+    /**
+     * Configure the channel pipeline.
+     * Called after profile and features have been applied.
+     */
+    void configure(ChannelPipeline pipeline, ServerSpec serverSpec);
+
+    /**
+     * Return whether this configurer should be applied to the given server.
+     */
+    default boolean supports(ServerSpec serverSpec) {
+        return true;
+    }
+
+    /**
+     * Return the order in which this configurer should be applied.
+     * Lower values are applied first.
+     */
+    default int getOrder() {
+        return 0;
+    }
+}
+----
+
+=== Example Usage
+
+[source,java]
+----
+@Component
+public class MetricsConfigurer implements NettyPipelineConfigurer {
+
+    private final MeterRegistry meterRegistry;
+
+    public MetricsConfigurer(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("metricsHandler", new MetricsHandler(meterRegistry, serverSpec.getName()));
+    }
+
+    @Override
+    public boolean supports(ServerSpec serverSpec) {
+        // Only apply to servers with metrics enabled
+        return "production-server".equals(serverSpec.getName());
+    }
+
+    @Override
+    public int getOrder() {
+        return 100;  // After other configurers
+    }
+}
+----
+
+== Final Pipeline Structure
+
+=== TCP Length-Field JSON Server (with SSL + Idle)
+
+[source,text]
+----
+ChannelPipeline:
+├── [1] sslHandler              (SslFeatureProvider, order=10)
+├── [2] idleStateHandler        (IdleFeatureProvider, order=150)
+├── [3] frameDecoder            (TcpLengthFieldJsonProfile)
+├── [4] frameEncoder            (TcpLengthFieldJsonProfile)
+├── [5] dispatcherHandler       (PipelineAssembler)
+├── [6] exceptionHandler        (PipelineAssembler)
+└── [7] customHandler           (NettyPipelineConfigurer)
+----
+
+=== HTTP JSON Server (with Logging + RateLimit)
+
+[source,text]
+----
+ChannelPipeline:
+├── [1] loggingHandler          (LoggingFeatureProvider, order=50)
+├── [2] rateLimitHandler        (RateLimitFeatureProvider, order=50)
+├── [3] httpCodec               (Http1JsonProfile)
+├── [4] httpAggregator          (Http1JsonProfile)
+├── [5] dispatcherHandler       (PipelineAssembler)
+└── [6] exceptionHandler        (PipelineAssembler)
+----
+
+== Creating Custom Extensions
+
+=== Custom Profile
+
+[source,java]
+----
+@Component
+public class ProtobufProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "tcp-lengthfield-protobuf";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // Frame codec
+        pipeline.addLast("frameDecoder",
+            new LengthFieldBasedFrameDecoder(1048576, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder",
+            new LengthFieldPrepender(4));
+
+        // Protobuf codec
+        pipeline.addLast("protobufDecoder",
+            new ProtobufDecoder(MyMessage.getDefaultInstance()));
+        pipeline.addLast("protobufEncoder",
+            new ProtobufEncoder());
+    }
+
+    @Override
+    public String getDefaultCodec() {
+        return "protobuf";
+    }
+}
+----
+
+=== Custom Feature
+
+[source,java]
+----
+@Component
+public class IpWhitelistFeatureProvider implements FeatureProvider {
+
+    public static final int ORDER = 5;  // Before SSL
+
+    @Override
+    public String getName() {
+        return "ipWhitelist";
+    }
+
+    @Override
+    public int getOrder() {
+        return ORDER;
+    }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) {
+        Map<String, Object> features = serverSpec.getFeatures();
+        if (features == null) return false;
+        Map<String, Object> config = (Map<String, Object>) features.get("ipWhitelist");
+        return config != null && Boolean.TRUE.equals(config.get("enabled"));
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        Map<String, Object> config = (Map<String, Object>)
+            serverSpec.getFeatures().get("ipWhitelist");
+        List<String> allowedIps = (List<String>) config.get("allowedIps");
+
+        IpFilterRule[] rules = allowedIps.stream()
+            .map(ip -> createRule(ip))
+            .toArray(IpFilterRule[]::new);
+
+        pipeline.addLast("ipFilter", new RuleBasedIpFilter(rules));
+    }
+}
+----
+
+== Summary
+
+The server pipeline assembly follows a clear order:
+
+1. **Protocol Type** - Set for error handling
+2. **Low-order Features (0-199)** - SSL, connection limits, logging
+3. **Profile** - Frame encoding/decoding
+4. **High-order Features (200+)** - Business features
+5. **Dispatcher** - Message routing
+6. **Exception Handler** - Error handling
+7. **Custom Configurers** - User extensions
+
+This layered approach provides:
+
+* **Separation of concerns** - Each component has a single responsibility
+* **Flexibility** - Easy to add/remove features
+* **Extensibility** - Custom profiles, features, and configurers
+* **Consistency** - Standard pipeline structure across servers

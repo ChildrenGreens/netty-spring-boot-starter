@@ -1,0 +1,151 @@
+= 处理器
+:page-pagination:
+
+处理器是应用逻辑的核心。本页介绍所有处理器类型、注解和参数绑定选项。
+
+== 处理器类型概览
+
+[cols="2,2,3"]
+|===
+|控制器类型 |注解 |用途
+
+|TCP/UDP 消息处理器
+|`@NettyMessageController`
+|处理按类型字段路由的消息
+
+|HTTP 控制器
+|`@NettyController`
+|REST API 端点
+
+|WebSocket 处理器
+|`@NettyController`
+|WebSocket 事件 (连接、消息、关闭)
+|===
+
+== TCP/UDP 消息处理器
+
+=== 基本用法
+
+[source,java]
+----
+@NettyMessageController
+public class GameMessageHandler {
+
+    @NettyMessageMapping("player.move")
+    public MoveResponse handleMove(MoveRequest request, NettyContext context) {
+        return new MoveResponse(request.getPlayerId(), newPosition);
+    }
+
+    @NettyMessageMapping("player.attack")
+    public AttackResponse handleAttack(AttackRequest request) {
+        return attackService.processAttack(request);
+    }
+}
+----
+
+=== 消息格式
+
+消息是包含 `type` 字段的 JSON 对象，用于路由：
+
+[source,json]
+----
+{
+    "type": "player.move",
+    "playerId": 12345,
+    "x": 100,
+    "y": 200
+}
+----
+
+== HTTP 控制器
+
+[source,java]
+----
+@NettyController(path = "/api/v1")
+public class UserController {
+
+    @NettyHttpGet("/users/{id}")
+    public User getUser(@PathVar("id") Long id) {
+        return userService.findById(id);
+    }
+
+    @NettyHttpPost("/users")
+    public User createUser(@Body UserCreateRequest request) {
+        return userService.create(request);
+    }
+}
+----
+
+== WebSocket 处理器
+
+[source,java]
+----
+@NettyController(path = "/ws")
+public class ChatWebSocketHandler {
+
+    @NettyWsOnOpen("/chat/{roomId}")
+    public void onConnect(@PathVar("roomId") String roomId, NettyContext context) {
+        // 处理连接
+    }
+
+    @NettyWsOnText("/chat/{roomId}")
+    public void onMessage(String message, @PathVar("roomId") String roomId) {
+        // 处理消息
+    }
+
+    @NettyWsOnClose("/chat/{roomId}")
+    public void onDisconnect(@PathVar("roomId") String roomId, NettyContext context) {
+        // 处理断开
+    }
+}
+----
+
+== 参数注解
+
+[cols="2,1,4"]
+|===
+|注解 |必填 |描述
+
+|`@PathVar("name")`
+|否
+|从 URL 提取路径变量
+
+|`@Query("name")`
+|否
+|提取查询参数
+
+|`@Header("name")`
+|否
+|提取 HTTP 头
+
+|`@Body`
+|否
+|反序列化请求体
+
+|`@Param("name")`
+|否
+|从消息负载提取命名参数
+|===
+
+== 返回类型
+
+[source,java]
+----
+// 同步返回
+@NettyMessageMapping("sync")
+public Response handleSync(Request request) {
+    return processRequest(request);
+}
+
+// 异步返回
+@NettyMessageMapping("async")
+public CompletableFuture<Response> handleAsync(Request request) {
+    return CompletableFuture.supplyAsync(() -> processRequest(request));
+}
+
+// 无返回值
+@NettyMessageMapping("fire-and-forget")
+public void handleNoResponse(Request request) {
+    eventBus.publish(request);
+}
+----

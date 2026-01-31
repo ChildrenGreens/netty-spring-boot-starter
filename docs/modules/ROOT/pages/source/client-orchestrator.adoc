@@ -1,0 +1,627 @@
+= Client Orchestrator Source Analysis
+:page-pagination:
+
+This document provides a deep dive into `NettyClientOrchestrator`, the central class that manages all client instances, their lifecycle, and runtime components.
+
+== Architecture Overview
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              NettyClientOrchestrator                                         │
+│                                                                                              │
+│  Implements:                                                                                 │
+│  ├── InitializingBean      → afterPropertiesSet() starts all clients                        │
+│  ├── DisposableBean        → destroy() stops all clients                                    │
+│  └── ApplicationEventPublisherAware → publishes connect/disconnect events                   │
+│                                                                                              │
+│  Core Responsibilities:                                                                      │
+│  ┌───────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  1. Read client specifications from configuration (ClientSpec)                         │  │
+│  │  2. Create runtime components for each client:                                         │  │
+│  │     ├── Bootstrap (Netty client bootstrap)                                             │  │
+│  │     ├── EventLoopGroup (worker thread group)                                           │  │
+│  │     ├── ConnectionPool (connection pooling)                                            │  │
+│  │     ├── ReconnectManager (reconnection with backoff)                                   │  │
+│  │     ├── HeartbeatManager (keep-alive heartbeat)                                        │  │
+│  │     └── RequestInvoker (request/response correlation)                                  │  │
+│  │  3. Manage client lifecycle (start, stop)                                              │  │
+│  │  4. Publish lifecycle events                                                           │  │
+│  └───────────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/NettyClientOrchestrator.java
+----
+
+== Class Definition and Dependencies
+
+[source,java]
+----
+public class NettyClientOrchestrator
+        implements InitializingBean, DisposableBean, ApplicationEventPublisherAware {
+
+    // ============ Dependencies ============
+    private final NettyProperties properties;           // Configuration properties
+    private final TransportFactory transportFactory;    // Transport layer factory
+    private final ClientPipelineAssembler pipelineAssembler;  // Pipeline assembler
+    private final CodecRegistry codecRegistry;          // Codec registry
+
+    // ============ Runtime State ============
+    private final Map<String, ClientRuntime> runtimes = new ConcurrentHashMap<>();  // Client runtimes
+    private ApplicationEventPublisher eventPublisher;   // Event publisher
+    private ScheduledExecutorService scheduledExecutor; // Scheduler (reconnect, heartbeat)
+    private boolean failFast = true;                    // Fail fast on startup errors
+}
+----
+
+== Lifecycle Methods
+
+[source,java]
+----
+// Called automatically after Spring Bean initialization
+@Override
+public void afterPropertiesSet() throws Exception {
+    start();  // Start all clients
+}
+
+// Called automatically when Spring Bean is destroyed
+@Override
+public void destroy() throws Exception {
+    stop();   // Stop all clients
+}
+----
+
+== Startup Flow
+
+=== start() Method
+
+[source,java]
+----
+public void start() {
+    // 1. Check if enabled
+    if (!properties.isEnabled()) {
+        logger.info("Netty is disabled, skipping client startup");
+        return;
+    }
+
+    // 2. Check if any clients configured
+    if (properties.getClients().isEmpty()) {
+        logger.debug("No clients configured");
+        return;
+    }
+
+    // 3. Create shared scheduler (for reconnect and heartbeat)
+    scheduledExecutor = Executors.newScheduledThreadPool(2, r -> {
+        Thread t = new Thread(r, "netty-client-scheduler");
+        t.setDaemon(true);
+        return t;
+    });
+
+    // 4. Iterate all client configurations and start each
+    for (ClientSpec spec : properties.getClients()) {
+        try {
+            startClient(spec);
+        } catch (Exception e) {
+            logger.error("Failed to start client [{}]", spec.getName(), e);
+            if (failFast) {
+                throw new IllegalStateException("Failed to start client: " + spec.getName(), e);
+            }
+        }
+    }
+
+    logger.info("Started {} Netty client(s)", runtimes.size());
+}
+----
+
+=== startClient() Method
+
+[source,java]
+----
+private void startClient(ClientSpec spec) throws Exception {
+    logger.info("Starting client [{}] connecting to {}:{} with profile [{}]",
+            spec.getName(), spec.getHost(), spec.getPort(), spec.getProfile());
+
+    // ========== Step 1: Resolve thread configuration ==========
+    ThreadsSpec threads = resolveThreads(spec);
+    int workerThreads = threads.getWorker();
+
+    // ========== Step 2: Create EventLoopGroup ==========
+    EventLoopGroup workerGroup = transportFactory.createWorkerGroup(workerThreads);
+
+    // ========== Step 3: Get codec ==========
+    NettyCodec codec = codecRegistry.getDefaultCodec();
+
+    // ========== Step 4: Create request invoker ==========
+    RequestInvoker requestInvoker = new RequestInvoker(spec, codec);
+
+    // ========== Step 5: Create Bootstrap ==========
+    Bootstrap bootstrap = new Bootstrap();
+    bootstrap.group(workerGroup)
+            .channel(transportFactory.getClientChannelClass())     // NioSocketChannel
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) spec.getTimeout().getConnectMs())
+            .option(ChannelOption.SO_KEEPALIVE, true)
+            .option(ChannelOption.TCP_NODELAY, true)
+            .handler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    // ★ Configure Pipeline
+                    pipelineAssembler.assemble(ch.pipeline(), spec, requestInvoker);
+                }
+            });
+
+    // ========== Step 6: Create connection pool ==========
+    ConnectionPool connectionPool = new ConnectionPool(spec, bootstrap);
+
+    // ========== Step 7: Create reconnect manager ==========
+    ReconnectManager reconnectManager = new ReconnectManager(
+            spec, bootstrap, connectionPool, scheduledExecutor);
+    connectionPool.setReconnectManager(reconnectManager);
+
+    // ========== Step 8: Create heartbeat manager ==========
+    HeartbeatManager heartbeatManager = new HeartbeatManager(
+            spec, connectionPool, requestInvoker, scheduledExecutor);
+
+    // ========== Step 9: Create runtime object ==========
+    ClientRuntime runtime = new ClientRuntime(spec, bootstrap, workerGroup,
+            connectionPool, reconnectManager, heartbeatManager, requestInvoker);
+    runtime.setState(ClientRuntime.ClientState.RUNNING);
+
+    // ========== Step 10: Start heartbeat (if configured) ==========
+    if (spec.getHeartbeat().isEnabled()) {
+        heartbeatManager.start();
+    }
+
+    // ========== Step 11: Store runtime & publish event ==========
+    runtimes.put(spec.getName(), runtime);
+    publishEvent(new NettyClientConnectedEvent(this, spec.getName(), spec.getHost(), spec.getPort()));
+
+    logger.info("Client [{}] started successfully", spec.getName());
+}
+----
+
+== Shutdown Flow
+
+=== stop() Method
+
+[source,java]
+----
+public void stop() {
+    logger.info("Stopping {} Netty client(s)...", runtimes.size());
+
+    // Stop all clients
+    for (ClientRuntime runtime : runtimes.values()) {
+        stopClient(runtime);
+    }
+    runtimes.clear();
+
+    // Shutdown scheduler
+    if (scheduledExecutor != null) {
+        scheduledExecutor.shutdown();
+        try {
+            if (!scheduledExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduledExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduledExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    logger.info("All Netty clients stopped");
+}
+----
+
+=== stopClient() Method
+
+[source,java]
+----
+private void stopClient(ClientRuntime runtime) {
+    logger.info("Stopping client [{}]...", runtime.getName());
+    runtime.setState(ClientRuntime.ClientState.STOPPING);
+
+    // 1. Stop heartbeat
+    if (runtime.getHeartbeatManager() != null) {
+        runtime.getHeartbeatManager().stop();
+    }
+
+    // 2. Stop reconnect
+    if (runtime.getReconnectManager() != null) {
+        runtime.getReconnectManager().stop();
+    }
+
+    // 3. Close connection pool
+    if (runtime.getConnectionPool() != null) {
+        runtime.getConnectionPool().close();
+    }
+
+    // 4. Close request invoker
+    if (runtime.getRequestInvoker() != null) {
+        runtime.getRequestInvoker().close();
+    }
+
+    // 5. Shutdown worker group
+    if (runtime.getWorkerGroup() != null) {
+        runtime.getWorkerGroup().shutdownGracefully();
+    }
+
+    runtime.setState(ClientRuntime.ClientState.STOPPED);
+
+    // 6. Publish disconnect event
+    ClientSpec spec = runtime.getClientSpec();
+    publishEvent(new NettyClientDisconnectedEvent(this, runtime.getName(),
+            spec.getHost(), spec.getPort(), null));
+
+    logger.info("Client [{}] stopped", runtime.getName());
+}
+----
+
+== Core Components
+
+=== ClientRuntime - Runtime Information Container
+
+[source,java]
+----
+public class ClientRuntime {
+    private final ClientSpec clientSpec;           // Client configuration
+    private final Bootstrap bootstrap;             // Netty bootstrap
+    private final EventLoopGroup workerGroup;      // Worker thread group
+    private final ConnectionPool connectionPool;   // Connection pool
+    private final ReconnectManager reconnectManager;  // Reconnect manager
+    private final HeartbeatManager heartbeatManager;  // Heartbeat manager
+    private final RequestInvoker requestInvoker;   // Request invoker
+    private volatile ClientState state;            // Current state
+
+    public enum ClientState {
+        CREATED,   // Created
+        STARTING,  // Starting
+        RUNNING,   // Running
+        STOPPING,  // Stopping
+        STOPPED    // Stopped
+    }
+}
+----
+
+=== ConnectionPool - Connection Pooling
+
+[source,java]
+----
+public class ConnectionPool {
+    // Core data structures
+    private final BlockingQueue<Channel> idleChannels;        // Idle connection queue
+    private final Set<Channel> borrowedChannels;              // Borrowed connections
+    private final AtomicInteger totalConnections;             // Total connection count
+
+    // Core methods
+    public Channel acquire() throws Exception {
+        // 1. Try to get from idle queue
+        Channel channel = idleChannels.poll();
+        if (channel != null && isChannelHealthy(channel)) {
+            borrowedChannels.add(channel);
+            return channel;
+        }
+
+        // 2. Try to create new connection (if under limit)
+        if (totalConnections.get() < poolSpec.getMaxConnections()) {
+            channel = createChannel();
+            borrowedChannels.add(channel);
+            return channel;
+        }
+
+        // 3. Wait for available connection
+        channel = idleChannels.poll(acquireTimeoutMs, TimeUnit.MILLISECONDS);
+        if (channel != null) {
+            return channel;
+        }
+
+        throw new TimeoutException("Timeout waiting for available connection");
+    }
+
+    public void release(Channel channel) {
+        borrowedChannels.remove(channel);
+        if (isChannelHealthy(channel)) {
+            idleChannels.offer(channel);
+        } else {
+            closeChannel(channel);
+            // Trigger reconnection
+            if (reconnectManager != null) {
+                reconnectManager.scheduleReconnect();
+            }
+        }
+    }
+}
+----
+
+=== ReconnectManager - Reconnection with Exponential Backoff
+
+[source,java]
+----
+public class ReconnectManager {
+    private final AtomicInteger retryCount = new AtomicInteger(0);
+    private final AtomicLong currentDelay = new AtomicLong(0);
+
+    public void scheduleReconnect() {
+        // Schedule reconnection task
+        long delay = currentDelay.get();
+        reconnectFuture = scheduler.schedule(this::doReconnect, delay, TimeUnit.MILLISECONDS);
+    }
+
+    private void doReconnect() {
+        // Check max retry count
+        if (maxRetries >= 0 && currentRetry > maxRetries) {
+            listener.onReconnectExhausted();
+            return;
+        }
+
+        // Attempt connection
+        ChannelFuture future = bootstrap.connect(host, port);
+        if (future.isSuccess()) {
+            // Success: reset state
+            resetState();
+            connectionPool.release(future.channel());
+        } else {
+            // Failure: calculate next delay (exponential backoff)
+            long nextDelay = (long) (currentDelay.get() * multiplier);
+            currentDelay.set(Math.min(nextDelay, maxDelayMs));
+            scheduleReconnect();
+        }
+    }
+}
+----
+
+==== Exponential Backoff Formula
+
+[source,text]
+----
+delay = min(initialDelay * (multiplier ^ attempt), maxDelay)
+
+Example (initialDelay=1000, multiplier=2.0, maxDelay=30000):
+  Attempt 1: 1000ms
+  Attempt 2: 2000ms
+  Attempt 3: 4000ms
+  Attempt 4: 8000ms
+  Attempt 5: 16000ms
+  Attempt 6: 30000ms (capped)
+----
+
+=== HeartbeatManager - Keep-Alive Heartbeat
+
+[source,java]
+----
+public class HeartbeatManager {
+    private static final int MAX_CONSECUTIVE_FAILURES = 3;
+    private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
+
+    public void start() {
+        // Schedule periodic heartbeat
+        heartbeatFuture = scheduler.scheduleAtFixedRate(
+            this::sendHeartbeat,
+            intervalMs,
+            intervalMs,
+            TimeUnit.MILLISECONDS
+        );
+    }
+
+    private void sendHeartbeat() {
+        Channel channel = connectionPool.acquire();
+        try {
+            // Send heartbeat request and wait for response
+            Object response = requestInvoker.invoke(
+                channel, heartbeatType, heartbeatMessage, timeoutMs
+            ).get(timeoutMs, TimeUnit.MILLISECONDS);
+
+            // Success: reset failure count
+            consecutiveFailures.set(0);
+        } catch (Exception e) {
+            // Failure: increment failure count
+            int failures = consecutiveFailures.incrementAndGet();
+            if (failures >= MAX_CONSECUTIVE_FAILURES) {
+                // 3 consecutive failures, mark connection unhealthy
+                listener.onConnectionUnhealthy();
+                consecutiveFailures.set(0);
+            }
+        } finally {
+            connectionPool.release(channel);
+        }
+    }
+}
+----
+
+=== RequestInvoker - Request/Response Correlation
+
+[source,java]
+----
+public class RequestInvoker {
+    public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+    public static final String MESSAGE_TYPE_HEADER = "type";
+
+    private final ConcurrentMap<String, ResponseFuture<Object>> pendingRequests;
+
+    // Async invocation
+    public CompletableFuture<Object> invoke(Channel channel, String type, Object payload, long timeout) {
+        String correlationId = UUID.randomUUID().toString().replace("-", "");
+
+        // Create Future and register
+        ResponseFuture<Object> future = new ResponseFuture<>(correlationId, timeout);
+        pendingRequests.put(correlationId, future);
+
+        // Build request message
+        Map<String, Object> request = new HashMap<>();
+        request.put(MESSAGE_TYPE_HEADER, type);
+        request.put(CORRELATION_ID_HEADER, correlationId);
+        // ... add payload
+
+        // Send request
+        channel.writeAndFlush(request);
+
+        return future.toCompletableFuture();
+    }
+
+    // Complete request (called by ClientResponseHandler)
+    public boolean completeRequest(String correlationId, Object response) {
+        ResponseFuture<Object> future = pendingRequests.remove(correlationId);
+        if (future != null) {
+            return future.complete(response);
+        }
+        return false;
+    }
+}
+----
+
+== Complete Startup Flow Diagram
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                            NettyClientOrchestrator.start()                                   │
+│                                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  for each ClientSpec in properties.getClients():                                       │  │
+│  │                                                                                        │  │
+│  │  ┌─────────────────────────────────────────────────────────────────────────────────┐  │  │
+│  │  │                          startClient(spec)                                       │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  1. Create EventLoopGroup (workerGroup)                                          │  │  │
+│  │  │     └── transportFactory.createWorkerGroup(workerThreads)                        │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  2. Create RequestInvoker                                                        │  │  │
+│  │  │     └── new RequestInvoker(spec, codec)                                          │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  3. Create Bootstrap                                                             │  │  │
+│  │  │     ├── .group(workerGroup)                                                      │  │  │
+│  │  │     ├── .channel(NioSocketChannel.class)                                         │  │  │
+│  │  │     ├── .option(CONNECT_TIMEOUT_MILLIS, ...)                                     │  │  │
+│  │  │     ├── .option(SO_KEEPALIVE, true)                                              │  │  │
+│  │  │     ├── .option(TCP_NODELAY, true)                                               │  │  │
+│  │  │     └── .handler(ChannelInitializer)                                             │  │  │
+│  │  │            └── pipelineAssembler.assemble(pipeline, spec, requestInvoker)        │  │  │
+│  │  │                    ├── Profile.configure() [frameDecoder, frameEncoder]          │  │  │
+│  │  │                    ├── addIdleHandler() [IdleStateHandler]                       │  │  │
+│  │  │                    ├── addCodecHandler() [JsonCodecHandler]                      │  │  │
+│  │  │                    └── add ClientResponseHandler                                 │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  4. Create ConnectionPool                                                        │  │  │
+│  │  │     └── new ConnectionPool(spec, bootstrap)                                      │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  5. Create ReconnectManager                                                      │  │  │
+│  │  │     └── new ReconnectManager(spec, bootstrap, connectionPool, scheduler)         │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  6. Create HeartbeatManager                                                      │  │  │
+│  │  │     └── new HeartbeatManager(spec, connectionPool, requestInvoker, scheduler)    │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  7. Create ClientRuntime (aggregates all components)                             │  │  │
+│  │  │     └── new ClientRuntime(spec, bootstrap, workerGroup, connectionPool,          │  │  │
+│  │  │                           reconnectManager, heartbeatManager, requestInvoker)    │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  8. Start HeartbeatManager (if enabled)                                          │  │  │
+│  │  │     └── heartbeatManager.start()                                                 │  │  │
+│  │  │                                                                                  │  │  │
+│  │  │  9. Store runtime & Publish event                                                │  │  │
+│  │  │     ├── runtimes.put(spec.getName(), runtime)                                    │  │  │
+│  │  │     └── publishEvent(NettyClientConnectedEvent)                                  │  │  │
+│  │  └─────────────────────────────────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Component Relationship Diagram
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                  ClientRuntime                                               │
+│                                                                                              │
+│  ┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐                        │
+│  │  ClientSpec  │────>│    Bootstrap     │────>│  EventLoopGroup  │                        │
+│  │ (Configuration)    │ (Netty Bootstrap)│     │ (Worker Threads) │                        │
+│  └──────────────┘     └──────────────────┘     └──────────────────┘                        │
+│         │                      │                                                            │
+│         │                      │                                                            │
+│         ▼                      ▼                                                            │
+│  ┌──────────────────────────────────────────────────────────────────────┐                  │
+│  │                        ConnectionPool                                 │                  │
+│  │                                                                       │                  │
+│  │  ┌─────────────────┐                    ┌─────────────────┐          │                  │
+│  │  │  idleChannels   │  ◄── release() ─── │ borrowedChannels │          │                  │
+│  │  │ (Idle Conns)    │ ─── acquire() ──► │ (Borrowed Conns) │          │                  │
+│  │  └─────────────────┘                    └─────────────────┘          │                  │
+│  │                                                                       │                  │
+│  │  createChannel() ─► Bootstrap.connect() ─► Pipeline Assembly         │                  │
+│  └──────────────────────────────────────────────────────────────────────┘                  │
+│         │                                           │                                       │
+│         │                                           │                                       │
+│         ▼                                           ▼                                       │
+│  ┌──────────────────┐                    ┌──────────────────────┐                          │
+│  │ ReconnectManager │                    │   HeartbeatManager    │                          │
+│  │                  │                    │                       │                          │
+│  │ - Exponential    │                    │ - Periodic heartbeat  │                          │
+│  │   backoff        │                    │ - Health detection    │                          │
+│  │ - Max retries    │                    │ - Failure threshold   │                          │
+│  │ - Listeners      │                    │                       │                          │
+│  └──────────────────┘                    └──────────────────────┘                          │
+│                                                    │                                        │
+│                                                    │                                        │
+│                                                    ▼                                        │
+│                                          ┌──────────────────────┐                          │
+│                                          │   RequestInvoker     │                          │
+│                                          │                      │                          │
+│                                          │ - Request/response   │                          │
+│                                          │   correlation        │                          │
+│                                          │ - Timeout handling   │                          │
+│                                          │ - correlationId mgmt │                          │
+│                                          └──────────────────────┘                          │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Summary
+
+`NettyClientOrchestrator` is the central management class for clients:
+
+[cols="2,4"]
+|===
+|Responsibility |Description
+
+|**Configuration Reading**
+|Reads all client configurations from `NettyProperties`
+
+|**Component Creation**
+|Creates Bootstrap, ConnectionPool, ReconnectManager, HeartbeatManager, RequestInvoker for each client
+
+|**Lifecycle Management**
+|Implements `InitializingBean`/`DisposableBean` for automatic start and stop
+
+|**Event Publishing**
+|Publishes `NettyClientConnectedEvent`/`NettyClientDisconnectedEvent`
+
+|**Runtime Management**
+|Aggregates all components via `ClientRuntime`, provides `getRuntime(name)` access
+|===
+
+== Related Classes
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`ClientRuntime`
+|Container holding all runtime components for a single client
+
+|`ConnectionPool`
+|Manages connection pooling with acquire/release semantics
+
+|`ReconnectManager`
+|Handles automatic reconnection with exponential backoff
+
+|`HeartbeatManager`
+|Sends periodic heartbeats to detect dead connections
+
+|`RequestInvoker`
+|Correlates requests and responses using correlation IDs
+
+|`ClientPipelineAssembler`
+|Assembles the Netty pipeline for client connections
+|===

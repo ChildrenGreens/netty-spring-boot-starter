@@ -101,7 +101,7 @@ public class UserController {
         return userService.findAll();
     }
 
-    @NettyHttpGet("/users/{id}")
+    @NettyHttpGet("/users/\{id\}")
     public User getUser(@PathVar("id") Long id) {
         return userService.findById(id);
     }
@@ -111,12 +111,12 @@ public class UserController {
         return userService.create(request);
     }
 
-    @NettyHttpPut("/users/{id}")
+    @NettyHttpPut("/users/\{id\}")
     public User updateUser(@PathVar("id") Long id, @Body UserUpdateRequest request) {
         return userService.update(id, request);
     }
 
-    @NettyHttpDelete("/users/{id}")
+    @NettyHttpDelete("/users/\{id\}")
     public void deleteUser(@PathVar("id") Long id) {
         userService.delete(id);
     }
@@ -131,7 +131,7 @@ public class UserController {
 
 |`@NettyHttpGet`
 |GET
-|`@NettyHttpGet("/users/{id}")`
+|`@NettyHttpGet("/users/\{id\}")`
 
 |`@NettyHttpPost`
 |POST
@@ -139,15 +139,15 @@ public class UserController {
 
 |`@NettyHttpPut`
 |PUT
-|`@NettyHttpPut("/users/{id}")`
+|`@NettyHttpPut("/users/\{id\}")`
 
 |`@NettyHttpDelete`
 |DELETE
-|`@NettyHttpDelete("/users/{id}")`
+|`@NettyHttpDelete("/users/\{id\}")`
 
 |`@NettyHttpPatch`
 |PATCH
-|`@NettyHttpPatch("/users/{id}")`
+|`@NettyHttpPatch("/users/\{id\}")`
 |===
 
 === Path Variables

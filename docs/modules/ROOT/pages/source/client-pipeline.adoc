@@ -1,0 +1,614 @@
+= Client Pipeline Source Analysis
+:page-pagination:
+
+This document provides a deep dive into the client-side pipeline assembly mechanism. Understanding this code helps you customize client behavior effectively.
+
+== Architecture Overview
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                           NettyClientOrchestrator                                        │
+│                                                                                          │
+│  On client startup:                                                                      │
+│  ┌───────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  Bootstrap bootstrap = new Bootstrap();                                            │  │
+│  │  bootstrap.handler(new ChannelInitializer<SocketChannel>() {                      │  │
+│  │      @Override                                                                     │  │
+│  │      protected void initChannel(SocketChannel ch) {                               │  │
+│  │          pipelineAssembler.assemble(ch.pipeline(), clientSpec, requestInvoker);  │  │
+│  │      }                                                                             │  │
+│  │  });                                                                               │  │
+│  └───────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                           ClientPipelineAssembler                                        │
+│                                                                                          │
+│  assemble(pipeline, clientSpec, requestInvoker)                                         │
+│  ┌───────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  Step 1: Apply ClientProfile (frame encoding/decoding)                             │  │
+│  │  Step 2: Add IdleStateHandler (if configured)                                      │  │
+│  │  Step 3: Add CodecHandler (JSON encoding/decoding)                                 │  │
+│  │  Step 4: Add ClientResponseHandler (response handling)                             │  │
+│  └───────────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== Core Class: NettyClientOrchestrator
+
+The `NettyClientOrchestrator` manages the lifecycle of all client instances and triggers pipeline assembly.
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/NettyClientOrchestrator.java
+----
+
+=== Client Startup Flow
+
+[source,java]
+----
+private void startClient(ClientSpec spec) throws Exception {
+    logger.info("Starting client [{}] connecting to {}:{} with profile [{}]",
+            spec.getName(), spec.getHost(), spec.getPort(), spec.getProfile());
+
+    // Resolve thread configuration
+    ThreadsSpec threads = resolveThreads(spec);
+    int workerThreads = threads.getWorker();
+
+    // Create event loop group
+    EventLoopGroup workerGroup = transportFactory.createWorkerGroup(workerThreads);
+
+    // Get codec
+    NettyCodec codec = codecRegistry.getDefaultCodec();
+
+    // Create request invoker for request/response correlation
+    RequestInvoker requestInvoker = new RequestInvoker(spec, codec);
+
+    // Create bootstrap
+    Bootstrap bootstrap = new Bootstrap();
+    bootstrap.group(workerGroup)
+            .channel(transportFactory.getClientChannelClass())
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) spec.getTimeout().getConnectMs())
+            .option(ChannelOption.SO_KEEPALIVE, true)
+            .option(ChannelOption.TCP_NODELAY, true)
+            .handler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    // ★ Pipeline assembly happens here
+                    pipelineAssembler.assemble(ch.pipeline(), spec, requestInvoker);
+                }
+            });
+
+    // Create connection pool
+    ConnectionPool connectionPool = new ConnectionPool(spec, bootstrap);
+
+    // Create reconnect manager
+    ReconnectManager reconnectManager = new ReconnectManager(
+            spec, bootstrap, connectionPool, scheduledExecutor);
+    connectionPool.setReconnectManager(reconnectManager);
+
+    // Create heartbeat manager
+    HeartbeatManager heartbeatManager = new HeartbeatManager(
+            spec, connectionPool, requestInvoker, scheduledExecutor);
+
+    // Start heartbeat if enabled
+    if (spec.getHeartbeat().isEnabled()) {
+        heartbeatManager.start();
+    }
+
+    // Store runtime and publish event
+    runtimes.put(spec.getName(), runtime);
+    publishEvent(new NettyClientConnectedEvent(this, spec.getName(), spec.getHost(), spec.getPort()));
+}
+----
+
+== Core Class: ClientPipelineAssembler
+
+The `ClientPipelineAssembler` builds the client pipeline with frame codecs, message codecs, and response handlers.
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/ClientPipelineAssembler.java
+----
+
+=== Class Definition
+
+[source,java]
+----
+public class ClientPipelineAssembler {
+
+    private final ClientProfileRegistry profileRegistry;
+    private final CodecRegistry codecRegistry;
+
+    public ClientPipelineAssembler(ClientProfileRegistry profileRegistry,
+                                    CodecRegistry codecRegistry) {
+        this.profileRegistry = profileRegistry;
+        this.codecRegistry = codecRegistry;
+    }
+}
+----
+
+=== The assemble() Method
+
+[source,java]
+----
+public void assemble(ChannelPipeline pipeline, ClientSpec clientSpec,
+                     RequestInvoker requestInvoker) {
+    String profileName = clientSpec.getProfile();
+
+    // ========== Step 1: Get and apply profile ==========
+    ClientProfile profile = profileRegistry.getProfile(profileName);
+    if (profile == null) {
+        throw new IllegalStateException("Unknown client profile: " + profileName);
+    }
+    profile.configure(pipeline, clientSpec);  // Add frame codecs
+
+    // ========== Step 2: Add idle handler if configured ==========
+    addIdleHandler(pipeline, clientSpec);
+
+    // ========== Step 3: Add codec handler ==========
+    addCodecHandler(pipeline, profile);
+
+    // ========== Step 4: Add response handler ==========
+    pipeline.addLast("responseHandler",
+            new ClientResponseHandler(requestInvoker, clientSpec.getName()));
+
+    logger.debug("Assembled client pipeline for [{}] with profile [{}]",
+            clientSpec.getName(), profileName);
+}
+----
+
+=== Idle Handler Configuration
+
+[source,java]
+----
+private void addIdleHandler(ChannelPipeline pipeline, ClientSpec clientSpec) {
+    IdleSpec idleSpec = clientSpec.getFeatures().getIdle();
+    if (idleSpec != null && idleSpec.isEnabled()) {
+        pipeline.addLast("idleStateHandler", new IdleStateHandler(
+                idleSpec.getReadSeconds(),
+                idleSpec.getWriteSeconds(),
+                idleSpec.getAllSeconds(),
+                TimeUnit.SECONDS
+        ));
+    }
+}
+----
+
+=== Codec Handler Configuration
+
+[source,java]
+----
+private void addCodecHandler(ChannelPipeline pipeline, ClientProfile profile) {
+    String codecName = profile.getDefaultCodec();
+    NettyCodec codec = codecRegistry.getCodec(codecName);
+
+    if (codec == null) {
+        // Fall back to JSON codec
+        codec = new JsonNettyCodec();
+    }
+
+    pipeline.addLast("codecHandler", new JsonCodecHandler(codec));
+}
+----
+
+== Pipeline Assembly Flow
+
+[source,text]
+----
+                     assemble(pipeline, clientSpec, requestInvoker)
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 1: Apply ClientProfile                                                     │
+    │                                                                                  │
+    │  ClientProfile profile = profileRegistry.getProfile(profileName);               │
+    │  profile.configure(pipeline, clientSpec);                                       │
+    │                                                                                  │
+    │  For tcp-lengthfield-json:                                                       │
+    │  ┌──────────────────────────────────────────────────────────────────┐           │
+    │  │  pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(...))     │
+    │  │  pipeline.addLast("frameEncoder", new LengthFieldPrepender(4))               │
+    │  └──────────────────────────────────────────────────────────────────┘           │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 2: Add IdleStateHandler (if enabled)                                       │
+    │                                                                                  │
+    │  if (idleSpec != null && idleSpec.isEnabled()) {                                │
+    │      pipeline.addLast("idleStateHandler", new IdleStateHandler(                 │
+    │          idleSpec.getReadSeconds(),                                              │
+    │          idleSpec.getWriteSeconds(),                                             │
+    │          idleSpec.getAllSeconds(),                                               │
+    │          TimeUnit.SECONDS                                                        │
+    │      ));                                                                          │
+    │  }                                                                               │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 3: Add CodecHandler                                                        │
+    │                                                                                  │
+    │  NettyCodec codec = codecRegistry.getCodec(profile.getDefaultCodec());          │
+    │  pipeline.addLast("codecHandler", new JsonCodecHandler(codec));                 │
+    │                                                                                  │
+    │  JsonCodecHandler responsibilities:                                              │
+    │    - Inbound:  ByteBuf → Map<String, Object> (JSON deserialization)             │
+    │    - Outbound: Object → ByteBuf (JSON serialization)                            │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │  Step 4: Add ClientResponseHandler                                               │
+    │                                                                                  │
+    │  pipeline.addLast("responseHandler",                                            │
+    │      new ClientResponseHandler(requestInvoker, clientSpec.getName()));          │
+    │                                                                                  │
+    │  ClientResponseHandler responsibilities:                                         │
+    │    - Match responses to pending requests by correlationId                       │
+    │    - Handle push messages (messages without correlationId)                       │
+    │    - Connection state logging (channelActive, channelInactive)                  │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+----
+
+== ClientProfile Interface
+
+The `ClientProfile` interface defines protocol stack configuration for clients:
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/ClientProfile.java
+----
+
+=== Interface Definition
+
+[source,java]
+----
+public interface ClientProfile {
+
+    /**
+     * Return the unique name of this profile.
+     */
+    String getName();
+
+    /**
+     * Configure the channel pipeline according to this profile.
+     */
+    void configure(ChannelPipeline pipeline, ClientSpec clientSpec);
+
+    /**
+     * Return the default codec type for this profile.
+     */
+    default String getDefaultCodec() {
+        return "json";
+    }
+}
+----
+
+=== Example Implementation: TcpLengthFieldJsonClientProfile
+
+[source,java]
+----
+public class TcpLengthFieldJsonClientProfile implements ClientProfile {
+
+    public static final String NAME = "tcp-lengthfield-json";
+
+    private static final int MAX_FRAME_LENGTH = 1024 * 1024;  // 1MB
+    private static final int LENGTH_FIELD_OFFSET = 0;
+    private static final int LENGTH_FIELD_LENGTH = 4;          // 4-byte length prefix
+    private static final int LENGTH_ADJUSTMENT = 0;
+    private static final int INITIAL_BYTES_TO_STRIP = 4;       // Strip length field
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        // Frame decoder - reads length prefix and extracts frame
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
+                MAX_FRAME_LENGTH,
+                LENGTH_FIELD_OFFSET,
+                LENGTH_FIELD_LENGTH,
+                LENGTH_ADJUSTMENT,
+                INITIAL_BYTES_TO_STRIP
+        ));
+
+        // Frame encoder - prepends length to outgoing messages
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(LENGTH_FIELD_LENGTH));
+    }
+}
+----
+
+== ClientResponseHandler
+
+The `ClientResponseHandler` processes server responses and routes them to pending requests:
+
+=== Source Location
+
+[source]
+----
+netty-spring-boot-context/src/main/java/com/childrengreens/netty/spring/boot/context/client/ClientResponseHandler.java
+----
+
+=== Implementation
+
+[source,java]
+----
+public class ClientResponseHandler extends SimpleChannelInboundHandler<Map<String, Object>> {
+
+    private final RequestInvoker requestInvoker;
+    private final String clientName;
+
+    public ClientResponseHandler(RequestInvoker requestInvoker, String clientName) {
+        this.requestInvoker = requestInvoker;
+        this.clientName = clientName;
+    }
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, Map<String, Object> response) {
+        // Extract correlation ID from response
+        String correlationId = (String) response.get(RequestInvoker.CORRELATION_ID_HEADER);
+
+        if (correlationId != null) {
+            // Match response to pending request
+            boolean completed = requestInvoker.completeRequest(correlationId, response);
+            if (!completed) {
+                logger.debug("Received response without pending request: correlationId={}",
+                        correlationId);
+            }
+        } else {
+            // Response without correlation ID - may be a push message
+            logger.debug("Received message without correlationId from server");
+            handlePushMessage(ctx, response);
+        }
+    }
+
+    /**
+     * Handle push messages (messages without correlation ID).
+     * Subclasses can override to handle push messages.
+     */
+    protected void handlePushMessage(ChannelHandlerContext ctx, Map<String, Object> message) {
+        String messageType = (String) message.get(RequestInvoker.MESSAGE_TYPE_HEADER);
+        logger.debug("Push message received: type={}, client={}", messageType, clientName);
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        logger.info("Client [{}] connected to server: {}", clientName, ctx.channel().remoteAddress());
+        super.channelActive(ctx);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        logger.info("Client [{}] disconnected from server: {}", clientName, ctx.channel().remoteAddress());
+        super.channelInactive(ctx);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        logger.error("Client [{}] error: {}", clientName, cause.getMessage(), cause);
+        ctx.close();
+    }
+}
+----
+
+== Final Client Pipeline Structure
+
+[source,text]
+----
+Client Pipeline (tcp-lengthfield-json + idle enabled):
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  Outbound ←────────────────────────────────────────────────────────── Inbound      │
+│                                                                                      │
+│  [1] frameDecoder         (LengthFieldBasedFrameDecoder)  ← Inbound: Parse frames   │
+│  [2] frameEncoder         (LengthFieldPrepender)          → Outbound: Add length    │
+│  [3] idleStateHandler     (IdleStateHandler)              ↔ Bidirectional: Idle     │
+│  [4] codecHandler         (JsonCodecHandler)              ↔ Bidirectional: JSON     │
+│  [5] responseHandler      (ClientResponseHandler)         ← Inbound: Handle response│
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+=== Data Flow
+
+[source,text]
+----
+Outbound (Send Request):
+  Java Object → codecHandler (serialize to JSON) → frameEncoder (add length) → Network
+
+Inbound (Receive Response):
+  Network → frameDecoder (parse frame) → codecHandler (deserialize) → responseHandler (match request)
+----
+
+== Comparison with Server Pipeline
+
+[cols="2,3,3"]
+|===
+|Feature |Server (PipelineAssembler) |Client (ClientPipelineAssembler)
+
+|**Feature Support**
+|Multiple features (SSL, RateLimit, ConnectionLimit, Logging, Idle)
+|Only Idle support
+
+|**Custom Configurers**
+|Supports `NettyPipelineConfigurer`
+|Not supported
+
+|**Profiles**
+|Multiple (TCP, HTTP, WebSocket, UDP)
+|TCP only
+
+|**Message Handler**
+|DispatcherHandler + ExceptionHandler
+|ClientResponseHandler
+
+|**Extensibility**
+|High (Features + Configurers)
+|Low
+|===
+
+== Extending Client Pipeline
+
+Since the framework doesn't provide a built-in extension point for client pipelines (unlike `NettyPipelineConfigurer` for servers), you have the following options:
+
+=== Option 1: Custom ClientProfile
+
+Create a custom profile that adds your handlers:
+
+[source,java]
+----
+@Component
+public class CustomClientProfile implements ClientProfile {
+
+    public static final String NAME = "custom-tcp-json";
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        // Standard frame codecs
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
+                1024 * 1024, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(4));
+
+        // Custom handlers
+        pipeline.addLast("loggingHandler", new LoggingHandler(LogLevel.DEBUG));
+        pipeline.addLast("myCustomHandler", new MyCustomHandler());
+    }
+}
+----
+
+Then use in configuration:
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: my-client
+        profile: custom-tcp-json   # Use custom profile
+        host: 127.0.0.1
+        port: 9000
+----
+
+=== Option 2: Extend ClientPipelineAssembler
+
+Create a subclass that adds custom handlers:
+
+[source,java]
+----
+@Component
+@Primary
+public class CustomClientPipelineAssembler extends ClientPipelineAssembler {
+
+    public CustomClientPipelineAssembler(ClientProfileRegistry profileRegistry,
+                                          CodecRegistry codecRegistry) {
+        super(profileRegistry, codecRegistry);
+    }
+
+    @Override
+    public void assemble(ChannelPipeline pipeline, ClientSpec clientSpec,
+                         RequestInvoker requestInvoker) {
+        // Call parent method
+        super.assemble(pipeline, clientSpec, requestInvoker);
+
+        // Add custom handlers
+        if (shouldAddMetrics(clientSpec)) {
+            pipeline.addBefore("responseHandler", "metricsHandler",
+                    new ClientMetricsHandler(clientSpec.getName()));
+        }
+    }
+
+    private boolean shouldAddMetrics(ClientSpec clientSpec) {
+        // Custom logic to determine if metrics should be added
+        return "production-client".equals(clientSpec.getName());
+    }
+}
+----
+
+=== Option 3: Extend ClientResponseHandler
+
+For custom response handling logic:
+
+[source,java]
+----
+public class CustomResponseHandler extends ClientResponseHandler {
+
+    private final PushMessageListener pushListener;
+
+    public CustomResponseHandler(RequestInvoker requestInvoker, String clientName,
+                                  PushMessageListener pushListener) {
+        super(requestInvoker, clientName);
+        this.pushListener = pushListener;
+    }
+
+    @Override
+    protected void handlePushMessage(ChannelHandlerContext ctx, Map<String, Object> message) {
+        // Custom push message handling
+        String messageType = (String) message.get("type");
+        pushListener.onPushMessage(messageType, message);
+    }
+}
+----
+
+== Client Invocation Chain
+
+[source,text]
+----
+@NettyClient Interface Call
+       │
+       ▼
+ClientProxyFactory.createProxy()
+       │
+       ▼
+ClientInvocationHandler.invoke()
+       │
+       ▼
+RequestInvoker.invoke()
+       │
+       ▼
+ConnectionPool.acquire()  ──► Get/Create connection
+       │
+       ▼
+Bootstrap.connect()  ──► Triggers ChannelInitializer.initChannel()
+       │
+       ▼
+ClientPipelineAssembler.assemble()
+       │
+       ├── ClientProfile.configure()         [Frame codecs]
+       ├── addIdleHandler()                  [Idle detection]
+       ├── addCodecHandler()                 [JSON codec]
+       └── ClientResponseHandler             [Response handling]
+----
+
+== Summary
+
+The client pipeline assembly is simpler than the server:
+
+1. **Profile** - Frame encoding/decoding (4-byte length prefix)
+2. **Idle Handler** - Optional idle connection detection
+3. **Codec Handler** - JSON serialization/deserialization
+4. **Response Handler** - Request/response correlation
+
+Key differences from server:
+
+* No feature system (only Idle is supported)
+* No custom configurer support
+* Simpler pipeline structure
+* Single protocol support (TCP only)
+
+For advanced customization, extend `ClientProfile` or `ClientPipelineAssembler`.

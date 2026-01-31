@@ -1,0 +1,87 @@
+= 服务端 Pipeline 源码解析
+:page-pagination:
+
+本文深入分析服务端 Pipeline 组装机制的源码实现。
+
+== 架构概览
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────┐
+│                        PipelineAssembler                             │
+│                                                                      │
+│  依赖:                                                               │
+│  ├── ProfileRegistry     协议配置注册表                              │
+│  ├── FeatureRegistry     特性注册表                                  │
+│  ├── Dispatcher          消息分发器                                  │
+│  └── CodecRegistry       编解码器注册表                              │
+│                                                                      │
+│  组装流程:                                                           │
+│  1. 设置协议类型属性                                                 │
+│  2. 应用低顺序 Features (0-199): SSL, ConnectionLimit, Logging      │
+│  3. 应用 Profile: 帧编解码器                                         │
+│  4. 应用高顺序 Features (200+): 业务特性                             │
+│  5. 添加 DispatcherHandler                                          │
+│  6. 添加 ExceptionHandler                                           │
+│  7. 应用自定义配置器                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+----
+
+== 核心方法 assemble()
+
+[source,java]
+----
+public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec) {
+    Profile profile = profileRegistry.getRequiredProfile(profileName);
+
+    // Step 0: 设置协议类型
+    pipeline.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).set(profile.getProtocolType());
+
+    // Step 1: 应用 order < 200 的 Features
+    applyFeatures(pipeline, serverSpec, 0, 200);
+
+    // Step 2: 应用 Profile
+    profile.configure(pipeline, serverSpec);
+
+    // Step 3: 应用 order >= 200 的 Features
+    applyFeatures(pipeline, serverSpec, 200, Integer.MAX_VALUE);
+
+    // Step 4: 添加 DispatcherHandler
+    if (profile.supportsDispatcher()) {
+        pipeline.addLast("dispatcherHandler", new DispatcherHandler(...));
+    }
+
+    // Step 5: 添加 ExceptionHandler
+    pipeline.addLast("exceptionHandler", new ExceptionHandler());
+
+    // Step 6: 应用自定义配置器
+    for (NettyPipelineConfigurer configurer : configurers) {
+        if (configurer.supports(serverSpec)) {
+            configurer.configure(pipeline, serverSpec);
+        }
+    }
+}
+----
+
+== 最终 Pipeline 结构
+
+TCP Length-Field JSON 服务器 (启用 SSL + Idle):
+
+[source,text]
+----
+ChannelPipeline:
+├── [1] sslHandler              (SslFeatureProvider, order=10)
+├── [2] idleStateHandler        (IdleFeatureProvider, order=150)
+├── [3] frameDecoder            (TcpLengthFieldJsonProfile)
+├── [4] frameEncoder            (TcpLengthFieldJsonProfile)
+├── [5] dispatcherHandler       (PipelineAssembler)
+├── [6] exceptionHandler        (PipelineAssembler)
+└── [7] customHandler           (NettyPipelineConfigurer)
+----
+
+== 相关源文件
+
+* `PipelineAssembler.java` - Pipeline 组装器
+* `Profile.java` - 协议配置接口
+* `FeatureProvider.java` - 特性提供者接口
+* `NettyPipelineConfigurer.java` - 自定义配置器接口

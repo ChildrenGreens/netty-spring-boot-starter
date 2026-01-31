@@ -1,0 +1,102 @@
+= 协议配置
+:page-pagination:
+
+协议配置 (Profile) 定义服务器的完整协议栈，包括消息帧、编解码和协议特定处理器。
+
+== 内置协议配置
+
+[cols="2,1,1,3"]
+|===
+|Profile |传输 |编解码 |描述
+
+|`tcp-lengthfield-json`
+|TCP
+|JSON
+|4 字节长度前缀帧 + JSON 消息体
+
+|`tcp-line`
+|TCP
+|文本
+|行分隔帧 (换行符)
+
+|`tcp-raw`
+|TCP
+|原始
+|无帧，原始字节
+
+|`http1-json`
+|HTTP
+|JSON
+|HTTP/1.1 协议 + JSON 消息体
+
+|`websocket`
+|HTTP
+|JSON
+|WebSocket 协议 + JSON 消息
+
+|`udp-json`
+|UDP
+|JSON
+|UDP 数据报 + JSON 消息体
+|===
+
+== TCP Length-Field JSON Profile
+
+最常用的 TCP RPC 和消息传递配置。
+
+=== 线格式
+
+[source,text]
+----
++----------------+------------------+
+| 长度 (4B)      |   JSON 消息体    |
+| 大端序整数     |   UTF-8 字节     |
++----------------+------------------+
+|<-- 4 字节 --->|<-- N 字节 ----->|
+
+总帧大小 = 4 + N 字节
+----
+
+=== 配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: tcp-server
+        transport: TCP
+        port: 9000
+        profile: tcp-lengthfield-json
+----
+
+== 自定义协议配置
+
+实现 `Profile` 接口创建自定义协议配置：
+
+[source,java]
+----
+@Component
+public class ProtobufProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "tcp-lengthfield-protobuf";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 帧编解码器
+        pipeline.addLast("frameDecoder",
+            new LengthFieldBasedFrameDecoder(1048576, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder",
+            new LengthFieldPrepender(4));
+
+        // Protobuf 编解码器
+        pipeline.addLast("protobufDecoder",
+            new ProtobufDecoder(MyMessage.getDefaultInstance()));
+        pipeline.addLast("protobufEncoder",
+            new ProtobufEncoder());
+    }
+}
+----

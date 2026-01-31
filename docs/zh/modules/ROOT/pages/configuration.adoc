@@ -1,0 +1,129 @@
+= 配置
+:page-pagination:
+
+本页面介绍 Netty Spring Boot Starter 的所有配置选项。
+
+== 配置前缀
+
+所有配置使用 `spring.netty` 前缀。
+
+== 全局配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    enabled: true                    # 启用/禁用 Netty
+    defaults:
+      threads:
+        boss: 1                      # Boss 线程数
+        worker: 0                    # Worker 线程数 (0=CPU核心数)
+----
+
+== 服务端配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    servers:
+      - name: my-server              # 服务器名称
+        transport: TCP               # 传输类型: TCP, HTTP, UDP
+        host: 0.0.0.0               # 绑定地址
+        port: 9000                   # 端口
+        profile: tcp-lengthfield-json  # 协议配置
+        routing:
+          mode: MESSAGE_TYPE         # 路由模式
+        features:
+          ssl:
+            enabled: false
+          idle:
+            enabled: true
+            readSeconds: 60
+          rateLimit:
+            enabled: false
+            requestsPerSecond: 100
+----
+
+== 客户端配置
+
+[source,yaml]
+----
+spring:
+  netty:
+    clients:
+      - name: order-service          # 客户端名称
+        host: 127.0.0.1             # 服务器地址
+        port: 9000                   # 服务器端口
+        profile: tcp-lengthfield-json
+        timeout:
+          connectMs: 5000            # 连接超时
+          requestMs: 10000           # 请求超时
+        pool:
+          maxConnections: 10         # 最大连接数
+          minIdle: 2                 # 最小空闲连接
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 30000
+          multiplier: 2.0
+        heartbeat:
+          enabled: true
+          intervalMs: 30000
+----
+
+== 配置属性参考
+
+=== 服务端属性
+
+[cols="3,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`name`
+|必填
+|String
+|服务器唯一名称
+
+|`transport`
+|`TCP`
+|enum
+|传输类型: TCP, HTTP, UDP
+
+|`port`
+|必填
+|int
+|监听端口
+
+|`profile`
+|必填
+|String
+|协议配置名称
+|===
+
+=== 客户端属性
+
+[cols="3,1,1,4"]
+|===
+|属性 |默认值 |类型 |描述
+
+|`name`
+|必填
+|String
+|客户端唯一名称
+
+|`host`
+|必填
+|String
+|服务器地址
+
+|`port`
+|必填
+|int
+|服务器端口
+
+|`profile`
+|必填
+|String
+|协议配置名称
+|===

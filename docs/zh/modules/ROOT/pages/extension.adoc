@@ -1,0 +1,118 @@
+= 扩展点
+:page-pagination:
+
+本页介绍 Netty Spring Boot Starter 提供的扩展点。
+
+== 服务端扩展
+
+=== 自定义协议配置 (Profile)
+
+实现 `Profile` 接口：
+
+[source,java]
+----
+@Component
+public class MyProfile implements Profile {
+
+    @Override
+    public String getName() {
+        return "my-custom-profile";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 配置 Pipeline
+    }
+}
+----
+
+=== 自定义特性 (Feature)
+
+实现 `FeatureProvider` 接口：
+
+[source,java]
+----
+@Component
+public class MyFeature implements FeatureProvider {
+
+    @Override
+    public String getName() { return "myFeature"; }
+
+    @Override
+    public int getOrder() { return 100; }
+
+    @Override
+    public boolean isEnabled(ServerSpec serverSpec) { return true; }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        pipeline.addLast("myHandler", new MyHandler());
+    }
+}
+----
+
+=== Pipeline 配置器
+
+实现 `NettyPipelineConfigurer` 接口：
+
+[source,java]
+----
+@Component
+public class MyConfigurer implements NettyPipelineConfigurer {
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        // 在 Profile 和 Feature 之后执行
+        pipeline.addLast("customHandler", new CustomHandler());
+    }
+
+    @Override
+    public boolean supports(ServerSpec serverSpec) {
+        return "my-server".equals(serverSpec.getName());
+    }
+}
+----
+
+== 客户端扩展
+
+=== 自定义客户端协议配置
+
+实现 `ClientProfile` 接口：
+
+[source,java]
+----
+@Component
+public class MyClientProfile implements ClientProfile {
+
+    @Override
+    public String getName() {
+        return "my-client-profile";
+    }
+
+    @Override
+    public void configure(ChannelPipeline pipeline, ClientSpec clientSpec) {
+        // 配置客户端 Pipeline
+    }
+}
+----
+
+== 事件监听
+
+监听 Netty 生命周期事件：
+
+[source,java]
+----
+@Component
+public class NettyEventListener {
+
+    @EventListener
+    public void onServerStarted(NettyServerStartedEvent event) {
+        log.info("服务器启动: {}", event.getServerName());
+    }
+
+    @EventListener
+    public void onClientConnected(NettyClientConnectedEvent event) {
+        log.info("客户端连接: {}", event.getClientName());
+    }
+}
+----

@@ -1,0 +1,196 @@
+= 客户端编排器源码解析
+:page-pagination:
+
+本文深入分析 `NettyClientOrchestrator` 的源码实现，它是客户端的核心管理类。
+
+== 架构概览
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────┐
+│                      NettyClientOrchestrator                         │
+│                                                                      │
+│  实现接口:                                                           │
+│  ├── InitializingBean      → afterPropertiesSet() 启动所有客户端    │
+│  ├── DisposableBean        → destroy() 停止所有客户端               │
+│  └── ApplicationEventPublisherAware → 发布连接/断开事件             │
+│                                                                      │
+│  核心职责:                                                           │
+│  1. 读取配置中的客户端规格 (ClientSpec)                              │
+│  2. 为每个客户端创建运行时组件:                                      │
+│     ├── Bootstrap (Netty 客户端引导)                                │
+│     ├── EventLoopGroup (工作线程组)                                 │
+│     ├── ConnectionPool (连接池)                                     │
+│     ├── ReconnectManager (重连管理器)                               │
+│     ├── HeartbeatManager (心跳管理器)                               │
+│     └── RequestInvoker (请求调用器)                                 │
+│  3. 管理客户端生命周期 (启动、停止)                                  │
+│  4. 发布生命周期事件                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+----
+
+== 启动流程
+
+[source,java]
+----
+private void startClient(ClientSpec spec) throws Exception {
+    // 1. 创建 EventLoopGroup
+    EventLoopGroup workerGroup = transportFactory.createWorkerGroup(workerThreads);
+
+    // 2. 创建 RequestInvoker
+    RequestInvoker requestInvoker = new RequestInvoker(spec, codec);
+
+    // 3. 创建 Bootstrap
+    Bootstrap bootstrap = new Bootstrap();
+    bootstrap.group(workerGroup)
+            .channel(NioSocketChannel.class)
+            .handler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) {
+                    pipelineAssembler.assemble(ch.pipeline(), spec, requestInvoker);
+                }
+            });
+
+    // 4. 创建连接池
+    ConnectionPool connectionPool = new ConnectionPool(spec, bootstrap);
+
+    // 5. 创建重连管理器
+    ReconnectManager reconnectManager = new ReconnectManager(...);
+
+    // 6. 创建心跳管理器
+    HeartbeatManager heartbeatManager = new HeartbeatManager(...);
+
+    // 7. 创建运行时对象
+    ClientRuntime runtime = new ClientRuntime(...);
+
+    // 8. 启动心跳
+    if (spec.getHeartbeat().isEnabled()) {
+        heartbeatManager.start();
+    }
+
+    // 9. 发布事件
+    publishEvent(new NettyClientConnectedEvent(...));
+}
+----
+
+== 核心组件
+
+=== ConnectionPool - 连接池
+
+[source,java]
+----
+public Channel acquire() throws Exception {
+    // 1. 尝试从空闲队列获取
+    Channel channel = idleChannels.poll();
+    if (channel != null && isChannelHealthy(channel)) {
+        return channel;
+    }
+
+    // 2. 创建新连接 (未达上限)
+    if (totalConnections.get() < maxConnections) {
+        return createChannel();
+    }
+
+    // 3. 等待可用连接
+    channel = idleChannels.poll(acquireTimeoutMs, TimeUnit.MILLISECONDS);
+    if (channel == null) {
+        throw new TimeoutException("获取连接超时");
+    }
+    return channel;
+}
+----
+
+=== ReconnectManager - 重连管理器
+
+指数退避公式: `delay = min(initialDelay * (multiplier ^ attempt), maxDelay)`
+
+[source,text]
+----
+重试 1: 等待 1000ms
+重试 2: 等待 2000ms
+重试 3: 等待 4000ms
+重试 4: 等待 8000ms
+重试 5: 等待 16000ms
+重试 6: 等待 30000ms (达到上限)
+----
+
+=== RequestInvoker - 请求调用器
+
+[source,java]
+----
+public CompletableFuture<Object> invoke(Channel channel, String type,
+                                         Object payload, long timeout) {
+    String correlationId = UUID.randomUUID().toString();
+
+    // 注册 Future
+    ResponseFuture<Object> future = new ResponseFuture<>(correlationId, timeout);
+    pendingRequests.put(correlationId, future);
+
+    // 构建请求
+    Map<String, Object> request = new HashMap<>();
+    request.put("type", type);
+    request.put("X-Correlation-Id", correlationId);
+
+    // 发送
+    channel.writeAndFlush(request);
+
+    return future.toCompletableFuture();
+}
+----
+
+== 组件关系图
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────┐
+│                          ClientRuntime                               │
+│                                                                      │
+│  ClientSpec ───> Bootstrap ───> EventLoopGroup                      │
+│       │              │                                               │
+│       └──────────────┼──────────────────────────────────────────────│
+│                      ▼                                               │
+│            ┌─────────────────────┐                                  │
+│            │   ConnectionPool    │                                  │
+│            │                     │                                  │
+│            │ idleChannels ◄─────── borrowedChannels                 │
+│            │      ↑       acquire()      │                          │
+│            │      └──── release() ───────┘                          │
+│            └─────────────────────┘                                  │
+│                   │           │                                      │
+│                   ▼           ▼                                      │
+│        ┌──────────────┐  ┌──────────────────┐                       │
+│        │ReconnectManager│  │HeartbeatManager │                       │
+│        │ - 指数退避    │  │ - 定时心跳      │                       │
+│        │ - 最大重试    │  │ - 健康检测      │                       │
+│        └──────────────┘  └──────────────────┘                       │
+│                                   │                                  │
+│                                   ▼                                  │
+│                          ┌──────────────────┐                       │
+│                          │  RequestInvoker  │                       │
+│                          │ - 请求/响应关联  │                       │
+│                          │ - 超时处理       │                       │
+│                          └──────────────────┘                       │
+└─────────────────────────────────────────────────────────────────────┘
+----
+
+== 总结
+
+[cols="2,4"]
+|===
+|职责 |描述
+
+|配置读取
+|从 `NettyProperties` 读取所有客户端配置
+
+|组件创建
+|创建 Bootstrap、ConnectionPool、ReconnectManager、HeartbeatManager、RequestInvoker
+
+|生命周期管理
+|实现 `InitializingBean`/`DisposableBean`，自动启动和停止
+
+|事件发布
+|发布 `NettyClientConnectedEvent`/`NettyClientDisconnectedEvent`
+
+|运行时管理
+|通过 `ClientRuntime` 聚合所有组件
+|===

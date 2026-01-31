@@ -1,0 +1,94 @@
+= Actuator 集成
+:page-pagination:
+
+Netty Spring Boot Starter 与 Spring Boot Actuator 集成，提供健康检查、指标和端点。
+
+== 启用 Actuator
+
+添加依赖：
+
+[source,xml]
+----
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+----
+
+== 健康检查
+
+Netty 服务器和客户端自动注册健康指示器：
+
+[source,bash]
+----
+GET /actuator/health
+----
+
+[source,json]
+----
+{
+  "status": "UP",
+  "components": {
+    "nettyServers": {
+      "status": "UP",
+      "details": {
+        "my-server": "RUNNING on port 9000"
+      }
+    },
+    "nettyClients": {
+      "status": "UP",
+      "details": {
+        "order-service": "CONNECTED to 127.0.0.1:9000"
+      }
+    }
+  }
+}
+----
+
+== Netty 端点
+
+=== 服务器信息
+
+[source,bash]
+----
+GET /actuator/netty/servers
+----
+
+=== 客户端信息
+
+[source,bash]
+----
+GET /actuator/netty/clients
+----
+
+=== 特定客户端详情
+
+[source,bash]
+----
+GET /actuator/netty/clients/order-service
+----
+
+== Micrometer 指标
+
+[cols="2,3"]
+|===
+|指标 |描述
+
+|`netty.server.connections`
+|当前连接数
+
+|`netty.server.messages.received`
+|接收消息数
+
+|`netty.server.messages.sent`
+|发送消息数
+
+|`netty.client.pool.size`
+|连接池大小
+
+|`netty.client.pool.active`
+|活跃连接数
+
+|`netty.client.requests`
+|请求数
+|===

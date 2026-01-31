@@ -1,0 +1,76 @@
+= Netty Spring Boot Starter
+:page-pagination:
+
+为 Spring Boot 3.x 应用提供声明式 Netty 服务端和客户端支持。
+
+[.lead]
+通过简单的注解和配置，快速构建高性能网络应用。
+
+== 特性
+
+* *声明式服务端* - 使用 `@NettyMessageController` 和 `@NettyController` 注解定义消息处理器
+* *声明式客户端* - 类似 OpenFeign 的 `@NettyClient` 接口代理
+* *多协议支持* - TCP、HTTP、WebSocket、UDP
+* *连接池* - 客户端连接池，支持自动重连和心跳
+* *可扩展* - 自定义 Profile、Feature、Pipeline 配置器
+* *Spring Boot 集成* - 自动配置、Actuator 端点
+
+== 快速示例
+
+=== 服务端
+
+[source,java]
+----
+@NettyMessageController
+public class PingHandler {
+
+    @NettyMessageMapping("ping")
+    public Map<String, Object> handlePing() {
+        return Map.of(
+            "type", "pong",
+            "timestamp", System.currentTimeMillis()
+        );
+    }
+}
+----
+
+=== 客户端
+
+[source,java]
+----
+@NettyClient(name = "my-server")
+public interface MyServerClient {
+
+    @NettyRequest("ping")
+    PongResponse ping();
+}
+----
+
+== 模块结构
+
+[cols="2,4"]
+|===
+|模块 |描述
+
+|`netty-spring-boot-starter`
+|Starter POM，引入所有依赖
+
+|`netty-spring-boot-autoconfigure`
+|Spring Boot 自动配置
+
+|`netty-spring-boot-context`
+|核心功能：注解、处理器、路由、编解码器
+
+|`netty-spring-boot-actuator`
+|Actuator 端点和指标
+|===
+
+== 下一步
+
+* xref:getting-started.adoc[快速开始] - 5 分钟入门教程
+* xref:configuration.adoc[配置] - 完整配置参考
+* xref:server/handlers.adoc[处理器] - 服务端消息处理
+
+== 语言
+
+* link:../netty-spring-boot/index.html[English]

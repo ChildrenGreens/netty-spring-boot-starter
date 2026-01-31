@@ -1,0 +1,87 @@
+= 客户端 Pipeline 源码解析
+:page-pagination:
+
+本文深入分析客户端 Pipeline 组装机制的源码实现。
+
+== 架构概览
+
+[source,text]
+----
+┌─────────────────────────────────────────────────────────────────────┐
+│                     ClientPipelineAssembler                          │
+│                                                                      │
+│  组装流程:                                                           │
+│  1. 应用 ClientProfile (帧编解码)                                    │
+│  2. 添加 IdleStateHandler (如果配置)                                 │
+│  3. 添加 CodecHandler (JSON 编解码)                                  │
+│  4. 添加 ClientResponseHandler (响应处理)                            │
+└─────────────────────────────────────────────────────────────────────┘
+----
+
+== 核心方法 assemble()
+
+[source,java]
+----
+public void assemble(ChannelPipeline pipeline, ClientSpec clientSpec,
+                     RequestInvoker requestInvoker) {
+    // Step 1: 应用 Profile
+    ClientProfile profile = profileRegistry.getProfile(profileName);
+    profile.configure(pipeline, clientSpec);
+
+    // Step 2: 添加空闲处理器
+    addIdleHandler(pipeline, clientSpec);
+
+    // Step 3: 添加编解码处理器
+    addCodecHandler(pipeline, profile);
+
+    // Step 4: 添加响应处理器
+    pipeline.addLast("responseHandler",
+            new ClientResponseHandler(requestInvoker, clientSpec.getName()));
+}
+----
+
+== 最终 Pipeline 结构
+
+[source,text]
+----
+客户端 Pipeline (tcp-lengthfield-json + idle):
+┌─────────────────────────────────────────────────────────────────────┐
+│  出站 ←────────────────────────────────────────────────── 入站     │
+│                                                                      │
+│  [1] frameDecoder         (LengthFieldBasedFrameDecoder)  ← 入站    │
+│  [2] frameEncoder         (LengthFieldPrepender)          → 出站    │
+│  [3] idleStateHandler     (IdleStateHandler)              ↔ 双向    │
+│  [4] codecHandler         (JsonCodecHandler)              ↔ 双向    │
+│  [5] responseHandler      (ClientResponseHandler)         ← 入站    │
+└─────────────────────────────────────────────────────────────────────┘
+----
+
+== 数据流
+
+[source,text]
+----
+出站 (发送请求):
+  Java Object → codecHandler (JSON序列化) → frameEncoder (添加长度) → 网络
+
+入站 (接收响应):
+  网络 → frameDecoder (解析帧) → codecHandler (反序列化) → responseHandler (匹配请求)
+----
+
+== 与服务端对比
+
+[cols="2,3,3"]
+|===
+|特性 |服务端 |客户端
+
+|Feature 支持
+|多种 (SSL, RateLimit, ConnectionLimit, Logging, Idle)
+|仅 Idle
+
+|自定义配置器
+|支持 NettyPipelineConfigurer
+|不支持
+
+|消息处理器
+|DispatcherHandler + ExceptionHandler
+|ClientResponseHandler
+|===
