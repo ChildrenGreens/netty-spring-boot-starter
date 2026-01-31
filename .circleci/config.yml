@@ -27,7 +27,7 @@ jobs:
     parameters:
       xcode-version:
         type: string
-        default: "16.2.0"
+        default: "26.2.0"
     macos:
       xcode: << parameters.xcode-version >>
     resource_class: m4pro.medium
@@ -61,7 +61,7 @@ workflows:
       - build-and-test-linux:
           name: linux-jdk25
           jdk-version: "25.0"
-      # macOS build (Xcode 16.2.0 includes OpenJDK 25)
+      # macOS build (Xcode 26.2.0 includes OpenJDK 25)
       - build-and-test-macos:
           name: macos-jdk25
-          xcode-version: "16.2.0"
+          xcode-version: "26.2.0"
