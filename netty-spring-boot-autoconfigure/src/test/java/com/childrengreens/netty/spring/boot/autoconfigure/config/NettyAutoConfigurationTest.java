@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.autoconfigure.config;
 
+import com.childrengreens.netty.spring.boot.actuator.metrics.NettyMetricsBinder;
 import com.childrengreens.netty.spring.boot.context.client.ClientPipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.client.ClientProfileRegistry;
 import com.childrengreens.netty.spring.boot.context.client.ClientProxyFactory;
@@ -189,6 +190,55 @@ class NettyAutoConfigurationTest {
                     assertThat(context).doesNotHaveBean(ClientProxyFactory.class);
                     // Server beans should still be present
                     assertThat(context).hasSingleBean(NettyServerOrchestrator.class);
+                });
+    }
+
+    // ==================== Metrics Configuration Tests ====================
+
+    private final ApplicationContextRunner metricsContextRunner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(
+                    NettyAutoConfiguration.class,
+                    NettyServerAutoConfiguration.class,
+                    NettyClientAutoConfiguration.class,
+                    NettyMetricsAutoConfiguration.class));
+
+    @Test
+    void metricsAutoConfiguration_createsMetricsBinder_withServerAndClient() {
+        this.metricsContextRunner.run(context -> assertThat(context).hasSingleBean(NettyMetricsBinder.class));
+    }
+
+    @Test
+    void metricsAutoConfiguration_createsMetricsBinder_withServerOnly() {
+        this.metricsContextRunner
+                .withPropertyValues("spring.netty.client.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(NettyServerOrchestrator.class);
+                    assertThat(context).doesNotHaveBean(NettyClientOrchestrator.class);
+                    assertThat(context).hasSingleBean(NettyMetricsBinder.class);
+                });
+    }
+
+    @Test
+    void metricsAutoConfiguration_createsMetricsBinder_withClientOnly() {
+        this.metricsContextRunner
+                .withPropertyValues("spring.netty.server.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(NettyServerOrchestrator.class);
+                    assertThat(context).hasSingleBean(NettyClientOrchestrator.class);
+                    assertThat(context).hasSingleBean(NettyMetricsBinder.class);
+                });
+    }
+
+    @Test
+    void metricsAutoConfiguration_doesNotCreateMetricsBinder_withNoOrchestrators() {
+        this.metricsContextRunner
+                .withPropertyValues(
+                        "spring.netty.server.enabled=false",
+                        "spring.netty.client.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(NettyServerOrchestrator.class);
+                    assertThat(context).doesNotHaveBean(NettyClientOrchestrator.class);
+                    assertThat(context).doesNotHaveBean(NettyMetricsBinder.class);
                 });
     }
 }

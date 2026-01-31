@@ -22,9 +22,12 @@ import com.childrengreens.netty.spring.boot.context.server.NettyServerOrchestrat
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 
 /**
  * Auto-configuration for Netty metrics with Micrometer.
@@ -54,15 +57,31 @@ public class NettyMetricsAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
+    @Conditional(OnServerOrClientCondition.class)
     public NettyMetricsBinder nettyMetricsBinder(
             ObjectProvider<NettyServerOrchestrator> serverOrchestrator,
             ObjectProvider<NettyClientOrchestrator> clientOrchestrator) {
         NettyServerOrchestrator server = serverOrchestrator.getIfAvailable();
         NettyClientOrchestrator client = clientOrchestrator.getIfAvailable();
-        if (server == null && client == null) {
-            return null;
-        }
         return new NettyMetricsBinder(server, client);
+    }
+
+    /**
+     * Condition that matches when either server or client orchestrator is present.
+     */
+    static class OnServerOrClientCondition extends AnyNestedCondition {
+
+        OnServerOrClientCondition() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @ConditionalOnBean(NettyServerOrchestrator.class)
+        static class OnServerOrchestrator {
+        }
+
+        @ConditionalOnBean(NettyClientOrchestrator.class)
+        static class OnClientOrchestrator {
+        }
     }
 
 }
