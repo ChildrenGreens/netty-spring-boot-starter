@@ -19,6 +19,7 @@ package com.childrengreens.netty.spring.boot.context.server;
 import com.childrengreens.netty.spring.boot.context.event.NettyEvent;
 import com.childrengreens.netty.spring.boot.context.event.NettyServerStartedEvent;
 import com.childrengreens.netty.spring.boot.context.event.NettyServerStoppedEvent;
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.properties.*;
 import com.childrengreens.netty.spring.boot.context.transport.TransportFactory;
@@ -151,18 +152,21 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
         EventLoopGroup bossGroup = transportFactory.createBossGroup(bossThreads);
         EventLoopGroup workerGroup = transportFactory.createWorkerGroup(workerThreads);
 
+        // Create server metrics before pipeline assembly
+        ServerMetrics serverMetrics = new ServerMetrics(spec.getName());
+
         try {
             // Create channel initializer
             ChannelInitializer<SocketChannel> initializer = new ChannelInitializer<>() {
                 @Override
                 protected void initChannel(SocketChannel ch) {
-                    pipelineAssembler.assemble(ch.pipeline(), spec);
+                    pipelineAssembler.assemble(ch.pipeline(), spec, serverMetrics);
                 }
             };
 
             // Start transport
             TransportStarter starter = transportFactory.getTransportStarter(spec.getTransport());
-            ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer);
+            ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer, serverMetrics);
 
             runtimes.put(spec.getName(), runtime);
 

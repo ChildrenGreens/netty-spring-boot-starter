@@ -26,6 +26,7 @@ import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
 import com.childrengreens.netty.spring.boot.context.feature.IdleFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.LoggingFeatureProvider;
+import com.childrengreens.netty.spring.boot.context.feature.MetricsFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.RateLimitFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.SslFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.pipeline.NettyPipelineConfigurer;
@@ -113,6 +114,7 @@ public class NettyServerAutoConfiguration {
         FeatureRegistry registry = new FeatureRegistry();
 
         // Register built-in features
+        registry.register(new MetricsFeatureProvider());
         registry.register(new SslFeatureProvider());
         registry.register(new LoggingFeatureProvider());
         registry.register(new IdleFeatureProvider());

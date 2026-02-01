@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import io.netty.channel.ChannelInitializer;
@@ -43,8 +44,26 @@ public interface TransportStarter {
      * @return the server runtime
      * @throws Exception if startup fails
      */
-    ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
+    default ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                         EventLoopGroup workerGroup, ChannelInitializer<SocketChannel> initializer)
+            throws Exception {
+        return start(serverSpec, bossGroup, workerGroup, initializer, new ServerMetrics(serverSpec.getName()));
+    }
+
+    /**
+     * Start the server with metrics and return the runtime.
+     * @param serverSpec the server specification
+     * @param bossGroup the boss event loop group
+     * @param workerGroup the worker event loop group
+     * @param initializer the channel initializer
+     * @param serverMetrics the server metrics for tracking stats
+     * @return the server runtime
+     * @throws Exception if startup fails
+     * @since 0.0.2
+     */
+    ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
+                        EventLoopGroup workerGroup, ChannelInitializer<SocketChannel> initializer,
+                        ServerMetrics serverMetrics)
             throws Exception;
 
 }

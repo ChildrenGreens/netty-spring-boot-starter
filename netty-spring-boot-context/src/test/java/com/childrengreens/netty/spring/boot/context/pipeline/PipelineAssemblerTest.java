@@ -18,9 +18,11 @@ package com.childrengreens.netty.spring.boot.context.pipeline;
 
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.profile.ProfileRegistry;
 import com.childrengreens.netty.spring.boot.context.profile.TcpLengthFieldJsonProfile;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
@@ -380,6 +382,60 @@ class PipelineAssemblerTest {
         // Both features should be applied (low before profile, high after)
         assertThat(lowOrderApplied.get()).isTrue();
         assertThat(highOrderApplied.get()).isTrue();
+
+        channel.close();
+    }
+
+    // ==================== Tests for ServerMetrics support ====================
+
+    @Test
+    void assemble_withServerMetrics_setsMetricsAttribute() {
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        ServerMetrics serverMetrics = new ServerMetrics("test-server");
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assembler.assemble(channel.pipeline(), serverSpec, serverMetrics);
+
+        // Verify metrics attribute is set
+        ServerMetrics storedMetrics = channel.attr(NettyContext.SERVER_METRICS_KEY).get();
+        assertThat(storedMetrics).isSameAs(serverMetrics);
+
+        channel.close();
+    }
+
+    @Test
+    void assemble_withNullServerMetrics_doesNotSetMetricsAttribute() {
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assembler.assemble(channel.pipeline(), serverSpec, null);
+
+        // Verify metrics attribute is not set
+        ServerMetrics storedMetrics = channel.attr(NettyContext.SERVER_METRICS_KEY).get();
+        assertThat(storedMetrics).isNull();
+
+        channel.close();
+    }
+
+    @Test
+    void assemble_withoutServerMetrics_callsOverloadedMethod() {
+        ServerSpec serverSpec = new ServerSpec();
+        serverSpec.setName("test-server");
+        serverSpec.setProfile("tcp-lengthfield-json");
+
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        // Call without serverMetrics argument
+        assembler.assemble(channel.pipeline(), serverSpec);
+
+        // Pipeline should still be configured
+        assertThat(channel.pipeline().names()).contains("dispatcherHandler", "exceptionHandler");
 
         channel.close();
     }

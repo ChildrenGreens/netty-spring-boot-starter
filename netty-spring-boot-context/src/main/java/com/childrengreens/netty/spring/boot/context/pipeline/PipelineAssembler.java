@@ -23,12 +23,14 @@ import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
 import com.childrengreens.netty.spring.boot.context.handler.DispatcherHandler;
 import com.childrengreens.netty.spring.boot.context.handler.ExceptionHandler;
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.profile.Profile;
 import com.childrengreens.netty.spring.boot.context.profile.ProfileRegistry;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -92,6 +94,18 @@ public class PipelineAssembler {
      * @param serverSpec the server specification
      */
     public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec) {
+        assemble(pipeline, serverSpec, null);
+    }
+
+    /**
+     * Assemble the pipeline for the specified server with metrics support.
+     * @param pipeline the channel pipeline
+     * @param serverSpec the server specification
+     * @param serverMetrics the server metrics for tracking stats (may be null)
+     * @since 0.0.2
+     */
+    public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec,
+                         @Nullable ServerMetrics serverMetrics) {
         String profileName = serverSpec.getProfile();
         Profile profile = profileRegistry.getRequiredProfile(profileName);
 
@@ -101,6 +115,11 @@ public class PipelineAssembler {
         // 0. Set protocol type attribute for ExceptionHandler
         String protocolType = profile.getProtocolType();
         pipeline.channel().attr(NettyContext.PROTOCOL_TYPE_KEY).set(protocolType);
+
+        // 0.1 Set server metrics attribute for MetricsChannelHandler
+        if (serverMetrics != null) {
+            pipeline.channel().attr(NettyContext.SERVER_METRICS_KEY).set(serverMetrics);
+        }
 
         // 1. Apply features with low order numbers (SSL, connection governance)
         applyFeatures(pipeline, serverSpec, 0, 200);
@@ -114,7 +133,7 @@ public class PipelineAssembler {
         // 4. Add dispatcher handler if profile supports it
         if (profile.supportsDispatcher()) {
             pipeline.addLast("dispatcherHandler",
-                    new DispatcherHandler(dispatcher, serverSpec, codecRegistry));
+                    new DispatcherHandler(dispatcher, serverSpec, codecRegistry, serverMetrics));
         }
 
         // 5. Add exception handler

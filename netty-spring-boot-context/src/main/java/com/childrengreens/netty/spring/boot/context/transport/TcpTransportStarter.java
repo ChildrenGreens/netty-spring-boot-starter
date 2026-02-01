@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import com.childrengreens.netty.spring.boot.context.server.ServerState;
@@ -51,7 +52,8 @@ public class TcpTransportStarter implements TransportStarter {
     @Override
     public ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                                 EventLoopGroup workerGroup,
-                                ChannelInitializer<SocketChannel> initializer) throws Exception {
+                                ChannelInitializer<SocketChannel> initializer,
+                                ServerMetrics serverMetrics) throws Exception {
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup)
                 .channel(transportFactory.getServerChannelClass())
@@ -77,7 +79,8 @@ public class TcpTransportStarter implements TransportStarter {
                 bossGroup,
                 workerGroup,
                 channel,
-                ServerState.RUNNING
+                ServerState.RUNNING,
+                serverMetrics
         );
     }
 

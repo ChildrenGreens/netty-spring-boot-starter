@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import com.childrengreens.netty.spring.boot.context.server.ServerState;
@@ -53,7 +54,8 @@ public class UdpTransportStarter implements TransportStarter {
     @Override
     public ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                                 EventLoopGroup workerGroup,
-                                ChannelInitializer<SocketChannel> initializer) throws Exception {
+                                ChannelInitializer<SocketChannel> initializer,
+                                ServerMetrics serverMetrics) throws Exception {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(workerGroup)
                 .channel(NioDatagramChannel.class)
@@ -83,7 +85,8 @@ public class UdpTransportStarter implements TransportStarter {
                 null, // UDP doesn't use boss group
                 workerGroup,
                 channel,
-                ServerState.RUNNING
+                ServerState.RUNNING,
+                serverMetrics
         );
     }
 
