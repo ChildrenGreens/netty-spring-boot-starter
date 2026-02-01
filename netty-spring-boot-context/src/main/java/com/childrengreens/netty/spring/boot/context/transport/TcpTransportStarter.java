@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
@@ -28,6 +29,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
 
 /**
  * Transport starter for TCP-based servers (TCP, HTTP, WebSocket).
@@ -53,7 +55,8 @@ public class TcpTransportStarter implements TransportStarter {
     public ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                                 EventLoopGroup workerGroup,
                                 ChannelInitializer<SocketChannel> initializer,
-                                ServerMetrics serverMetrics) throws Exception {
+                                ServerMetrics serverMetrics,
+                                @Nullable BackpressureMetrics backpressureMetrics) throws Exception {
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup)
                 .channel(transportFactory.getServerChannelClass())
@@ -80,7 +83,8 @@ public class TcpTransportStarter implements TransportStarter {
                 workerGroup,
                 channel,
                 ServerState.RUNNING,
-                serverMetrics
+                serverMetrics,
+                backpressureMetrics
         );
     }
 

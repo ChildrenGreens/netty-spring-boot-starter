@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
@@ -30,6 +31,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
 
 /**
  * Transport starter for UDP-based servers.
@@ -55,7 +57,8 @@ public class UdpTransportStarter implements TransportStarter {
     public ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                                 EventLoopGroup workerGroup,
                                 ChannelInitializer<SocketChannel> initializer,
-                                ServerMetrics serverMetrics) throws Exception {
+                                ServerMetrics serverMetrics,
+                                @Nullable BackpressureMetrics backpressureMetrics) throws Exception {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(workerGroup)
                 .channel(NioDatagramChannel.class)
@@ -86,7 +89,8 @@ public class UdpTransportStarter implements TransportStarter {
                 workerGroup,
                 channel,
                 ServerState.RUNNING,
-                serverMetrics
+                serverMetrics,
+                backpressureMetrics
         );
     }
 

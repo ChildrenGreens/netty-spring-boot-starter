@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.context;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import io.netty.channel.Channel;
 import io.netty.util.AttributeKey;
@@ -83,6 +84,12 @@ public class NettyContext {
      * @since 0.0.2
      */
     public static final AttributeKey<ServerMetrics> SERVER_METRICS_KEY = AttributeKey.valueOf("netty.server.metrics");
+
+    /**
+     * Attribute key for storing backpressure metrics in the channel.
+     * @since 0.0.2
+     */
+    public static final AttributeKey<BackpressureMetrics> BACKPRESSURE_METRICS_KEY = AttributeKey.valueOf("netty.backpressure.metrics");
 
     private final Channel channel;
 

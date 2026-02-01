@@ -21,6 +21,7 @@ import com.childrengreens.netty.spring.boot.context.dispatch.ArgumentResolver;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.dispatch.PathVariableArgumentResolver;
 import com.childrengreens.netty.spring.boot.context.dispatch.QueryArgumentResolver;
+import com.childrengreens.netty.spring.boot.context.feature.BackpressureFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.ConnectionLimitFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureRegistry;
@@ -116,6 +117,7 @@ public class NettyServerAutoConfiguration {
         // Register built-in features
         registry.register(new MetricsFeatureProvider());
         registry.register(new SslFeatureProvider());
+        registry.register(new BackpressureFeatureProvider());
         registry.register(new LoggingFeatureProvider());
         registry.register(new IdleFeatureProvider());
         registry.register(new RateLimitFeatureProvider());

@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.actuator.metrics;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.client.ClientRuntime;
 import com.childrengreens.netty.spring.boot.context.client.ConnectionPool;
 import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrator;
@@ -46,6 +47,10 @@ import java.util.Map;
  * <li>{@code netty.server.bytes.out} - Total bytes sent</li>
  * <li>{@code netty.server.requests.total} - Total requests processed</li>
  * <li>{@code netty.server.request.latency.total} - Total request latency in nanoseconds</li>
+ * <li>{@code netty.server.backpressure.suspend} - Total times reading was suspended (backpressure)</li>
+ * <li>{@code netty.server.backpressure.resume} - Total times reading was resumed (backpressure)</li>
+ * <li>{@code netty.server.backpressure.dropped} - Total messages dropped due to backpressure</li>
+ * <li>{@code netty.server.backpressure.disconnect} - Total disconnections due to backpressure</li>
  * </ul>
  *
  * <p>Registers the following client metrics:
@@ -165,6 +170,34 @@ public class NettyMetricsBinder implements MeterBinder {
                     .baseUnit("nanoseconds")
                     .description("Total request latency in nanoseconds")
                     .register(registry);
+
+            // Backpressure metrics (if enabled)
+            BackpressureMetrics backpressureMetrics = runtime.getBackpressureMetrics();
+            if (backpressureMetrics != null) {
+                Gauge.builder(METRIC_PREFIX + ".server.backpressure.suspend", backpressureMetrics,
+                                BackpressureMetrics::getSuspendCount)
+                        .tags(tags)
+                        .description("Total times reading was suspended due to backpressure")
+                        .register(registry);
+
+                Gauge.builder(METRIC_PREFIX + ".server.backpressure.resume", backpressureMetrics,
+                                BackpressureMetrics::getResumeCount)
+                        .tags(tags)
+                        .description("Total times reading was resumed after backpressure")
+                        .register(registry);
+
+                Gauge.builder(METRIC_PREFIX + ".server.backpressure.dropped", backpressureMetrics,
+                                BackpressureMetrics::getDroppedCount)
+                        .tags(tags)
+                        .description("Total messages dropped due to backpressure")
+                        .register(registry);
+
+                Gauge.builder(METRIC_PREFIX + ".server.backpressure.disconnect", backpressureMetrics,
+                                BackpressureMetrics::getDisconnectCount)
+                        .tags(tags)
+                        .description("Total disconnections due to backpressure")
+                        .register(registry);
+            }
 
             logger.debug("Registered metrics for server: {}", serverName);
         }

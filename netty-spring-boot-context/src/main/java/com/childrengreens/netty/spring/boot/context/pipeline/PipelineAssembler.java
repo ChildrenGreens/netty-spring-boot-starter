@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.pipeline;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
@@ -106,6 +107,20 @@ public class PipelineAssembler {
      */
     public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec,
                          @Nullable ServerMetrics serverMetrics) {
+        assemble(pipeline, serverSpec, serverMetrics, null);
+    }
+
+    /**
+     * Assemble the pipeline for the specified server with metrics and backpressure metrics support.
+     * @param pipeline the channel pipeline
+     * @param serverSpec the server specification
+     * @param serverMetrics the server metrics for tracking stats (may be null)
+     * @param backpressureMetrics the backpressure metrics (may be null)
+     * @since 0.0.2
+     */
+    public void assemble(ChannelPipeline pipeline, ServerSpec serverSpec,
+                         @Nullable ServerMetrics serverMetrics,
+                         @Nullable BackpressureMetrics backpressureMetrics) {
         String profileName = serverSpec.getProfile();
         Profile profile = profileRegistry.getRequiredProfile(profileName);
 
@@ -119,6 +134,11 @@ public class PipelineAssembler {
         // 0.1 Set server metrics attribute for MetricsChannelHandler
         if (serverMetrics != null) {
             pipeline.channel().attr(NettyContext.SERVER_METRICS_KEY).set(serverMetrics);
+        }
+
+        // 0.2 Set backpressure metrics attribute for BackpressureHandler
+        if (backpressureMetrics != null) {
+            pipeline.channel().attr(NettyContext.BACKPRESSURE_METRICS_KEY).set(backpressureMetrics);
         }
 
         // 1. Apply features with low order numbers (SSL, connection governance)

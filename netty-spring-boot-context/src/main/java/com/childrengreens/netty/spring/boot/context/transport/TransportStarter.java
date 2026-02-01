@@ -16,12 +16,14 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import org.springframework.lang.Nullable;
 
 /**
  * Strategy interface for transport-specific server bootstrapping.
@@ -47,7 +49,8 @@ public interface TransportStarter {
     default ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                         EventLoopGroup workerGroup, ChannelInitializer<SocketChannel> initializer)
             throws Exception {
-        return start(serverSpec, bossGroup, workerGroup, initializer, new ServerMetrics(serverSpec.getName()));
+        return start(serverSpec, bossGroup, workerGroup, initializer,
+                new ServerMetrics(serverSpec.getName()), null);
     }
 
     /**
@@ -61,9 +64,28 @@ public interface TransportStarter {
      * @throws Exception if startup fails
      * @since 0.0.2
      */
-    ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
+    default ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
                         EventLoopGroup workerGroup, ChannelInitializer<SocketChannel> initializer,
                         ServerMetrics serverMetrics)
+            throws Exception {
+        return start(serverSpec, bossGroup, workerGroup, initializer, serverMetrics, null);
+    }
+
+    /**
+     * Start the server with metrics and backpressure metrics.
+     * @param serverSpec the server specification
+     * @param bossGroup the boss event loop group
+     * @param workerGroup the worker event loop group
+     * @param initializer the channel initializer
+     * @param serverMetrics the server metrics for tracking stats
+     * @param backpressureMetrics the backpressure metrics (may be null)
+     * @return the server runtime
+     * @throws Exception if startup fails
+     * @since 0.0.2
+     */
+    ServerRuntime start(ServerSpec serverSpec, EventLoopGroup bossGroup,
+                        EventLoopGroup workerGroup, ChannelInitializer<SocketChannel> initializer,
+                        ServerMetrics serverMetrics, @Nullable BackpressureMetrics backpressureMetrics)
             throws Exception;
 
 }

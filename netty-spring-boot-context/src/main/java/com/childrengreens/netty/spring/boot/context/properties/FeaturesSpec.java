@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.properties;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureSpec;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
 /**
@@ -58,6 +59,13 @@ public class FeaturesSpec {
      */
     @NestedConfigurationProperty
     private ConnectionLimitSpec connectionLimit;
+
+    /**
+     * Backpressure configuration.
+     * @since 0.0.2
+     */
+    @NestedConfigurationProperty
+    private BackpressureSpec backpressure;
 
     /**
      * Return the idle connection configuration.
@@ -137,6 +145,24 @@ public class FeaturesSpec {
      */
     public void setConnectionLimit(ConnectionLimitSpec connectionLimit) {
         this.connectionLimit = connectionLimit;
+    }
+
+    /**
+     * Return the backpressure configuration.
+     * @return the backpressure specification, or {@code null} if not configured
+     * @since 0.0.2
+     */
+    public BackpressureSpec getBackpressure() {
+        return this.backpressure;
+    }
+
+    /**
+     * Set the backpressure configuration.
+     * @param backpressure the backpressure specification
+     * @since 0.0.2
+     */
+    public void setBackpressure(BackpressureSpec backpressure) {
+        this.backpressure = backpressure;
     }
 
 }

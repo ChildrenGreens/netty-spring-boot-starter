@@ -16,6 +16,8 @@
 
 package com.childrengreens.netty.spring.boot.context.server;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureSpec;
 import com.childrengreens.netty.spring.boot.context.event.NettyEvent;
 import com.childrengreens.netty.spring.boot.context.event.NettyServerStartedEvent;
 import com.childrengreens.netty.spring.boot.context.event.NettyServerStoppedEvent;
@@ -155,18 +157,29 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
         // Create server metrics before pipeline assembly
         ServerMetrics serverMetrics = new ServerMetrics(spec.getName());
 
+        // Create backpressure metrics if enabled
+        BackpressureSpec backpressureSpec = spec.getFeatures().getBackpressure();
+        BackpressureMetrics backpressureMetrics = null;
+        if (backpressureSpec != null && backpressureSpec.isEnabled() && backpressureSpec.isMetrics()) {
+            backpressureMetrics = new BackpressureMetrics(spec.getName());
+        }
+
+        // Capture for lambda
+        final BackpressureMetrics finalBackpressureMetrics = backpressureMetrics;
+
         try {
             // Create channel initializer
             ChannelInitializer<SocketChannel> initializer = new ChannelInitializer<>() {
                 @Override
                 protected void initChannel(SocketChannel ch) {
-                    pipelineAssembler.assemble(ch.pipeline(), spec, serverMetrics);
+                    pipelineAssembler.assemble(ch.pipeline(), spec, serverMetrics, finalBackpressureMetrics);
                 }
             };
 
             // Start transport
             TransportStarter starter = transportFactory.getTransportStarter(spec.getTransport());
-            ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer, serverMetrics);
+            ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer,
+                    serverMetrics, backpressureMetrics);
 
             runtimes.put(spec.getName(), runtime);
 

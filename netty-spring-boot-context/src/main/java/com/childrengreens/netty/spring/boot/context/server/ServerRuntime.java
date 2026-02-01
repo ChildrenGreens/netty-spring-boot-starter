@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.server;
 
+import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ShutdownSpec;
@@ -23,6 +24,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
 
 import java.util.concurrent.TimeUnit;
 
@@ -43,6 +45,7 @@ public class ServerRuntime {
     private final EventLoopGroup workerGroup;
     private final Channel bindChannel;
     private final ServerMetrics metrics;
+    private final BackpressureMetrics backpressureMetrics;
     private volatile ServerState state;
 
     /**
@@ -55,7 +58,7 @@ public class ServerRuntime {
      */
     public ServerRuntime(ServerSpec spec, EventLoopGroup bossGroup,
                          EventLoopGroup workerGroup, Channel bindChannel, ServerState state) {
-        this(spec, bossGroup, workerGroup, bindChannel, state, new ServerMetrics(spec.getName()));
+        this(spec, bossGroup, workerGroup, bindChannel, state, new ServerMetrics(spec.getName()), null);
     }
 
     /**
@@ -71,12 +74,30 @@ public class ServerRuntime {
     public ServerRuntime(ServerSpec spec, EventLoopGroup bossGroup,
                          EventLoopGroup workerGroup, Channel bindChannel, ServerState state,
                          ServerMetrics metrics) {
+        this(spec, bossGroup, workerGroup, bindChannel, state, metrics, null);
+    }
+
+    /**
+     * Create a new ServerRuntime with metrics and backpressure metrics.
+     * @param spec the server specification
+     * @param bossGroup the boss event loop group
+     * @param workerGroup the worker event loop group
+     * @param bindChannel the bound server channel
+     * @param state the initial state
+     * @param metrics the server metrics
+     * @param backpressureMetrics the backpressure metrics (may be null)
+     * @since 0.0.2
+     */
+    public ServerRuntime(ServerSpec spec, EventLoopGroup bossGroup,
+                         EventLoopGroup workerGroup, Channel bindChannel, ServerState state,
+                         ServerMetrics metrics, @Nullable BackpressureMetrics backpressureMetrics) {
         this.spec = spec;
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
         this.bindChannel = bindChannel;
         this.state = state;
         this.metrics = metrics;
+        this.backpressureMetrics = backpressureMetrics;
     }
 
     /**
@@ -118,6 +139,16 @@ public class ServerRuntime {
      */
     public ServerMetrics getMetrics() {
         return this.metrics;
+    }
+
+    /**
+     * Return the backpressure metrics.
+     * @return the backpressure metrics, or {@code null} if backpressure is not enabled
+     * @since 0.0.2
+     */
+    @Nullable
+    public BackpressureMetrics getBackpressureMetrics() {
+        return this.backpressureMetrics;
     }
 
     /**
