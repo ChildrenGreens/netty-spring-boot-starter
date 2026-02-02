@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.properties;
 
+import com.childrengreens.netty.spring.boot.context.auth.AuthSpec;
 import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureSpec;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
@@ -66,6 +67,13 @@ public class FeaturesSpec {
      */
     @NestedConfigurationProperty
     private BackpressureSpec backpressure;
+
+    /**
+     * Authentication configuration.
+     * @since 0.0.2
+     */
+    @NestedConfigurationProperty
+    private AuthSpec auth;
 
     /**
      * Return the idle connection configuration.
@@ -163,6 +171,24 @@ public class FeaturesSpec {
      */
     public void setBackpressure(BackpressureSpec backpressure) {
         this.backpressure = backpressure;
+    }
+
+    /**
+     * Return the authentication configuration.
+     * @return the auth specification, or {@code null} if not configured
+     * @since 0.0.2
+     */
+    public AuthSpec getAuth() {
+        return this.auth;
+    }
+
+    /**
+     * Set the authentication configuration.
+     * @param auth the auth specification
+     * @since 0.0.2
+     */
+    public void setAuth(AuthSpec auth) {
+        this.auth = auth;
     }
 
 }

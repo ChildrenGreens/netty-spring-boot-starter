@@ -16,6 +16,8 @@
 
 package com.childrengreens.netty.spring.boot.context.context;
 
+import com.childrengreens.netty.spring.boot.context.auth.AuthMetrics;
+import com.childrengreens.netty.spring.boot.context.auth.AuthPrincipal;
 import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import io.netty.channel.Channel;
@@ -90,6 +92,18 @@ public class NettyContext {
      * @since 0.0.2
      */
     public static final AttributeKey<BackpressureMetrics> BACKPRESSURE_METRICS_KEY = AttributeKey.valueOf("netty.backpressure.metrics");
+
+    /**
+     * Attribute key for storing the authenticated principal in the channel.
+     * @since 0.0.2
+     */
+    public static final AttributeKey<AuthPrincipal> AUTH_PRINCIPAL_KEY = AttributeKey.valueOf("netty.auth.principal");
+
+    /**
+     * Attribute key for storing auth metrics in the channel.
+     * @since 0.0.2
+     */
+    public static final AttributeKey<AuthMetrics> AUTH_METRICS_KEY = AttributeKey.valueOf("netty.auth.metrics");
 
     private final Channel channel;
 
@@ -211,6 +225,34 @@ public class NettyContext {
      */
     public void close() {
         this.channel.close();
+    }
+
+    /**
+     * Return the authenticated principal for this channel.
+     * @return the auth principal, or {@code null} if not authenticated
+     * @since 0.0.2
+     */
+    public AuthPrincipal getAuthPrincipal() {
+        return this.channel.attr(AUTH_PRINCIPAL_KEY).get();
+    }
+
+    /**
+     * Return whether this channel is authenticated.
+     * @return {@code true} if authenticated
+     * @since 0.0.2
+     */
+    public boolean isAuthenticated() {
+        return getAuthPrincipal() != null;
+    }
+
+    /**
+     * Return the authenticated user ID.
+     * @return the user ID, or {@code null} if not authenticated
+     * @since 0.0.2
+     */
+    public String getUserId() {
+        AuthPrincipal principal = getAuthPrincipal();
+        return principal != null ? principal.getUserId() : null;
     }
 
 }

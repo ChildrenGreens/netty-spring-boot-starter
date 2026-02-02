@@ -18,6 +18,7 @@
 - **注解式路由** - 像 Spring MVC / Spring Messaging 一样开发处理器
 - **Profile 协议栈模板** - 一键启用协议栈，Feature 配置化叠加能力
 - **客户端支持** - 声明式客户端接口，支持连接池、自动重连、心跳保活
+- **身份认证** - 内置认证支持，Token 模式（HTTP）和凭证模式（WebSocket/TCP）
 - **生产就绪** - 内置可观测性（metrics/health），支持优雅关闭
 - **高度可扩展** - 高级用户可通过 Configurer/Codec/RouteResolver 扩展
 
@@ -402,6 +403,150 @@ spring:
           connectionLimit:
             enabled: true
             maxConnections: 10000
+
+          # 身份认证（需要 Authenticator Bean）
+          auth:
+            enabled: true
+            mode: CREDENTIAL          # TOKEN（HTTP）或 CREDENTIAL（WebSocket/TCP）
+            auth-route: "/auth"       # 凭证认证消息的路由
+            auth-timeout: 30000       # 未认证连接超时时间（毫秒）
+            close-on-failure: true    # 认证失败时关闭连接
+            exclude-paths:            # 跳过认证的路径（仅 HTTP）
+              - "/health"
+              - "/public/**"
+            connection-policy:
+              allow-multiple: false   # 允许同一用户多连接
+              strategy: KICK_OLD      # ALLOW、REJECT_NEW 或 KICK_OLD
+              max-connections-per-user: 1
+            token:                    # Token 配置（仅 TOKEN 模式）
+              type: JWT               # JWT 或 API_KEY
+              header-name: Authorization
+            metrics: true             # 启用认证指标
+```
+
+## 身份认证
+
+认证功能支持两种模式：
+
+| 模式 | 协议 | 描述 |
+|------|------|------|
+| `TOKEN` | HTTP | 从请求头获取 Token（JWT/API_KEY），每次请求验证 |
+| `CREDENTIAL` | WebSocket/TCP | 首条消息携带用户名/密码，基于连接的认证 |
+
+### 1. 实现 Authenticator
+
+```java
+@Component
+public class MyAuthenticator implements Authenticator {
+
+    @Autowired
+    private UserService userService;
+
+    @Override
+    public AuthResult authenticateToken(String token) {
+        // HTTP TOKEN 模式 - 验证 JWT/API_KEY
+        try {
+            Claims claims = Jwts.parser()
+                .setSigningKey(secretKey)
+                .parseClaimsJws(token.replace("Bearer ", ""))
+                .getBody();
+
+            return AuthResult.success(claims.getSubject())
+                .withUsername(claims.get("username", String.class))
+                .withRoles(claims.get("roles", String.class).split(","))
+                .withAttribute("tenantId", claims.get("tenantId"));
+        } catch (Exception e) {
+            return AuthResult.failure("INVALID_TOKEN", "Token 验证失败");
+        }
+    }
+
+    @Override
+    public AuthResult authenticateCredential(String username, String password) {
+        // WebSocket/TCP CREDENTIAL 模式
+        User user = userService.validateCredentials(username, password);
+        if (user != null) {
+            return AuthResult.success(user.getId())
+                .withUsername(username)
+                .withRoles(user.getRoles().toArray(new String[0]))
+                .withAttribute("department", user.getDepartment());
+        }
+        return AuthResult.failure("INVALID_CREDENTIALS", "用户名或密码错误");
+    }
+}
+```
+
+### 2. 访问已认证用户
+
+```java
+@NettyMessageController
+public class SecureHandler {
+
+    @NettyMessageMapping("secure-action")
+    public Response handleSecure(Request request, NettyContext context) {
+        // 获取认证主体
+        AuthPrincipal principal = context.getAuthPrincipal();
+
+        String userId = principal.getUserId();
+        String username = principal.getUsername();
+        boolean isAdmin = principal.hasRole("admin");
+        String tenantId = principal.getAttribute("tenantId");
+
+        // 检查是否已认证
+        if (!context.isAuthenticated()) {
+            throw new SecurityException("未认证");
+        }
+
+        return processSecureRequest(request, userId);
+    }
+}
+```
+
+### 3. WebSocket/TCP 认证消息格式
+
+CREDENTIAL 模式下，客户端首先发送认证消息：
+
+```json
+{
+  "type": "/auth",
+  "payload": {
+    "username": "admin",
+    "password": "secret123"
+  }
+}
+```
+
+服务端响应：
+
+```json
+{
+  "type": "/auth",
+  "success": true,
+  "payload": {
+    "userId": "user-123",
+    "username": "admin",
+    "roles": ["admin", "user"]
+  }
+}
+```
+
+### 4. 连接策略
+
+控制同一用户的多连接行为：
+
+| 策略 | 描述 |
+|------|------|
+| `ALLOW` | 允许所有连接（直到达到上限） |
+| `REJECT_NEW` | 如果用户已连接，拒绝新连接 |
+| `KICK_OLD` | 新连接认证时断开旧连接 |
+
+```java
+// 编程方式踢出用户
+@Autowired
+private ConnectionManager connectionManager;
+
+public void forceLogout(String userId) {
+    connectionManager.kickUser(userId, "管理员强制登出");
+}
 ```
 
 ## 扩展点
@@ -522,6 +667,10 @@ public class MyClientProfile implements ClientProfile {
 | `netty.server.bytes.out` | 服务器发送字节数 |
 | `netty.server.requests.total` | 服务器请求数 |
 | `netty.server.request.latency` | 服务器请求延迟 |
+| `netty.server.auth.success` | 认证成功次数 |
+| `netty.server.auth.failure` | 认证失败次数 |
+| `netty.server.auth.timeout` | 认证超时次数 |
+| `netty.server.auth.kicked` | 因连接策略被踢出的用户数 |
 | `netty.client.connections.current` | 当前客户端连接数 |
 | `netty.client.pool.size` | 连接池大小 |
 | `netty.client.pool.pending` | 等待连接请求数 |

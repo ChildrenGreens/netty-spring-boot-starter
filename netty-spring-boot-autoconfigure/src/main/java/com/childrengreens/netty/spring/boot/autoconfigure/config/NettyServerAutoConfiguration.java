@@ -16,11 +16,14 @@
 
 package com.childrengreens.netty.spring.boot.autoconfigure.config;
 
+import com.childrengreens.netty.spring.boot.context.auth.Authenticator;
+import com.childrengreens.netty.spring.boot.context.auth.ConnectionManager;
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.dispatch.ArgumentResolver;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.dispatch.PathVariableArgumentResolver;
 import com.childrengreens.netty.spring.boot.context.dispatch.QueryArgumentResolver;
+import com.childrengreens.netty.spring.boot.context.feature.AuthFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.BackpressureFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.ConnectionLimitFeatureProvider;
 import com.childrengreens.netty.spring.boot.context.feature.FeatureProvider;
@@ -228,6 +231,42 @@ public class NettyServerAutoConfiguration {
                                                             TransportFactory transportFactory,
                                                             PipelineAssembler pipelineAssembler) {
         return new NettyServerOrchestrator(properties, transportFactory, pipelineAssembler);
+    }
+
+    /**
+     * Create the connection manager for authentication.
+     *
+     * <p>The connection manager tracks authenticated connections per user
+     * and enforces connection policies.
+     *
+     * @return the connection manager
+     * @since 0.0.2
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(Authenticator.class)
+    public ConnectionManager connectionManager() {
+        return new ConnectionManager();
+    }
+
+    /**
+     * Create the auth feature provider.
+     *
+     * <p>This bean is only created when an {@link Authenticator} is provided
+     * by the application. The auth feature provides authentication support
+     * for both token-based (HTTP) and credential-based (WebSocket/TCP) modes.
+     *
+     * @param authenticator the authenticator implementation
+     * @param connectionManager the connection manager
+     * @return the auth feature provider
+     * @since 0.0.2
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean(Authenticator.class)
+    public AuthFeatureProvider authFeatureProvider(Authenticator authenticator,
+                                                    ConnectionManager connectionManager) {
+        return new AuthFeatureProvider(authenticator, connectionManager);
     }
 
 }

@@ -18,6 +18,7 @@ Support TCP/UDP/HTTP/WebSocket protocols with declarative configuration and anno
 - **Annotation-Based Routing** - Develop handlers like Spring MVC / Spring Messaging
 - **Profile-Based Protocol Stacks** - One-click protocol setup, with Feature-based capability overlay
 - **Client Support** - Declarative client interfaces with connection pooling, reconnection, and heartbeat
+- **Authentication** - Built-in auth support with Token (HTTP) and Credential (WebSocket/TCP) modes
 - **Production Ready** - Built-in observability (metrics/health), graceful shutdown support
 - **Highly Extensible** - Advanced users can extend via Configurer/Codec/RouteResolver
 
@@ -140,36 +141,36 @@ spring:
           mode: MESSAGE_TYPE
         features:
           idle:
-          enabled: true
-          readSeconds: 60
-        logging:
-          enabled: true
-          level: DEBUG
+            enabled: true
+            readSeconds: 60
+          logging:
+            enabled: true
+            level: DEBUG
 
-    - name: http-server
-      transport: HTTP
-      port: 8080
-      profile: http1-json
-      routing:
-        mode: PATH
+      - name: http-server
+        transport: HTTP
+        port: 8080
+        profile: http1-json
+        routing:
+          mode: PATH
 
-    - name: ws-server
-      transport: HTTP
-      port: 8081
-      profile: websocket
-      routing:
-        mode: WS_PATH
+      - name: ws-server
+        transport: HTTP
+        port: 8081
+        profile: websocket
+        routing:
+          mode: WS_PATH
 
-    - name: udp-server
-      transport: UDP
-      port: 7000
-      profile: udp-json
-      routing:
-        mode: MESSAGE_TYPE
+      - name: udp-server
+        transport: UDP
+        port: 7000
+        profile: udp-json
+        routing:
+          mode: MESSAGE_TYPE
 
-  observability:
-    metrics: true
-    health: true
+    observability:
+      metrics: true
+      health: true
 ```
 
 ### 3. Create Handlers
@@ -402,6 +403,150 @@ spring:
           connectionLimit:
             enabled: true
             maxConnections: 10000
+
+          # Authentication (requires Authenticator bean)
+          auth:
+            enabled: true
+            mode: CREDENTIAL          # TOKEN (HTTP) or CREDENTIAL (WebSocket/TCP)
+            auth-route: "/auth"       # Route for credential auth messages
+            auth-timeout: 30000       # Timeout for unauthenticated connections (ms)
+            close-on-failure: true    # Close connection on auth failure
+            exclude-paths:            # Paths that skip authentication (HTTP only)
+              - "/health"
+              - "/public/**"
+            connection-policy:
+              allow-multiple: false   # Allow multiple connections per user
+              strategy: KICK_OLD      # ALLOW, REJECT_NEW, or KICK_OLD
+              max-connections-per-user: 1
+            token:                    # Token config (TOKEN mode only)
+              type: JWT               # JWT or API_KEY
+              header-name: Authorization
+            metrics: true             # Enable auth metrics
+```
+
+## Authentication
+
+The auth feature supports two modes:
+
+| Mode | Protocol | Description |
+|------|----------|-------------|
+| `TOKEN` | HTTP | Token from header (JWT/API_KEY), validates each request |
+| `CREDENTIAL` | WebSocket/TCP | Username/password in first message, connection-based auth |
+
+### 1. Implement Authenticator
+
+```java
+@Component
+public class MyAuthenticator implements Authenticator {
+
+    @Autowired
+    private UserService userService;
+
+    @Override
+    public AuthResult authenticateToken(String token) {
+        // For HTTP TOKEN mode - validate JWT/API_KEY
+        try {
+            Claims claims = Jwts.parser()
+                .setSigningKey(secretKey)
+                .parseClaimsJws(token.replace("Bearer ", ""))
+                .getBody();
+
+            return AuthResult.success(claims.getSubject())
+                .withUsername(claims.get("username", String.class))
+                .withRoles(claims.get("roles", String.class).split(","))
+                .withAttribute("tenantId", claims.get("tenantId"));
+        } catch (Exception e) {
+            return AuthResult.failure("INVALID_TOKEN", "Token validation failed");
+        }
+    }
+
+    @Override
+    public AuthResult authenticateCredential(String username, String password) {
+        // For WebSocket/TCP CREDENTIAL mode
+        User user = userService.validateCredentials(username, password);
+        if (user != null) {
+            return AuthResult.success(user.getId())
+                .withUsername(username)
+                .withRoles(user.getRoles().toArray(new String[0]))
+                .withAttribute("department", user.getDepartment());
+        }
+        return AuthResult.failure("INVALID_CREDENTIALS", "Wrong username or password");
+    }
+}
+```
+
+### 2. Access Authenticated User
+
+```java
+@NettyMessageController
+public class SecureHandler {
+
+    @NettyMessageMapping("secure-action")
+    public Response handleSecure(Request request, NettyContext context) {
+        // Get authenticated principal
+        AuthPrincipal principal = context.getAuthPrincipal();
+
+        String userId = principal.getUserId();
+        String username = principal.getUsername();
+        boolean isAdmin = principal.hasRole("admin");
+        String tenantId = principal.getAttribute("tenantId");
+
+        // Check if authenticated
+        if (!context.isAuthenticated()) {
+            throw new SecurityException("Not authenticated");
+        }
+
+        return processSecureRequest(request, userId);
+    }
+}
+```
+
+### 3. WebSocket/TCP Auth Message Format
+
+For CREDENTIAL mode, the client sends an auth message first:
+
+```json
+{
+  "type": "/auth",
+  "payload": {
+    "username": "admin",
+    "password": "secret123"
+  }
+}
+```
+
+Server responds:
+
+```json
+{
+  "type": "/auth",
+  "success": true,
+  "payload": {
+    "userId": "user-123",
+    "username": "admin",
+    "roles": ["admin", "user"]
+  }
+}
+```
+
+### 4. Connection Policy
+
+Control multi-connection behavior per user:
+
+| Strategy | Description |
+|----------|-------------|
+| `ALLOW` | Allow all connections (up to max limit) |
+| `REJECT_NEW` | Reject new connection if user already connected |
+| `KICK_OLD` | Disconnect old connection when new one authenticates |
+
+```java
+// Programmatic kick
+@Autowired
+private ConnectionManager connectionManager;
+
+public void forceLogout(String userId) {
+    connectionManager.kickUser(userId, "Admin forced logout");
+}
 ```
 
 ## Extension Points
@@ -522,6 +667,10 @@ When `spring-boot-actuator` is on the classpath:
 | `netty.server.bytes.out` | Server bytes sent |
 | `netty.server.requests.total` | Server request count |
 | `netty.server.request.latency` | Server request latency |
+| `netty.server.auth.success` | Authentication success count |
+| `netty.server.auth.failure` | Authentication failure count |
+| `netty.server.auth.timeout` | Authentication timeout count |
+| `netty.server.auth.kicked` | Users kicked due to connection policy |
 | `netty.client.connections.current` | Current client connections |
 | `netty.client.pool.size` | Connection pool size |
 | `netty.client.pool.pending` | Pending connection requests |
