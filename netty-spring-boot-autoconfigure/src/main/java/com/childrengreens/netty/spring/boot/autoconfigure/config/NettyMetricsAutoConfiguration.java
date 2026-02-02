@@ -25,6 +25,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -46,6 +47,8 @@ import org.springframework.context.annotation.Configuration;
  */
 @AutoConfiguration(after = {NettyServerAutoConfiguration.class, NettyClientAutoConfiguration.class})
 @ConditionalOnClass({MeterRegistry.class, NettyMetricsBinder.class})
+@ConditionalOnProperty(prefix = "spring.netty.observability", name = "metrics",
+        havingValue = "true", matchIfMissing = true)
 public class NettyMetricsAutoConfiguration {
 
     /**

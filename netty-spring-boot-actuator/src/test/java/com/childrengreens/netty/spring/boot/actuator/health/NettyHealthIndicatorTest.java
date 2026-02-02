@@ -18,6 +18,7 @@ package com.childrengreens.netty.spring.boot.actuator.health;
 
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
+import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrator;
 import com.childrengreens.netty.spring.boot.context.server.NettyServerOrchestrator;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import com.childrengreens.netty.spring.boot.context.server.ServerState;
@@ -39,22 +40,26 @@ import static org.mockito.Mockito.when;
 class NettyHealthIndicatorTest {
 
     private NettyServerOrchestrator orchestrator;
+    private NettyClientOrchestrator clientOrchestrator;
     private NettyHealthIndicator healthIndicator;
 
     @BeforeEach
     void setUp() {
         orchestrator = mock(NettyServerOrchestrator.class);
-        healthIndicator = new NettyHealthIndicator(orchestrator);
+        clientOrchestrator = mock(NettyClientOrchestrator.class);
+        healthIndicator = new NettyHealthIndicator(orchestrator, clientOrchestrator);
+        when(clientOrchestrator.getAllRuntimes()).thenReturn(new HashMap<>());
     }
 
     @Test
     void health_withNoServers_returnsUnknown() {
         when(orchestrator.getAllRuntimes()).thenReturn(new HashMap<>());
+        when(clientOrchestrator.getAllRuntimes()).thenReturn(new HashMap<>());
 
         Health health = healthIndicator.health();
 
         assertThat(health.getStatus()).isEqualTo(Status.UNKNOWN);
-        assertThat(health.getDetails()).containsEntry("message", "No Netty servers configured");
+        assertThat(health.getDetails()).containsEntry("message", "No Netty servers or clients configured");
     }
 
     @Test
@@ -67,8 +72,11 @@ class NettyHealthIndicatorTest {
         Health health = healthIndicator.health();
 
         assertThat(health.getStatus()).isEqualTo(Status.UP);
-        assertThat(health.getDetails()).containsKey("server1");
-        assertThat(health.getDetails()).containsKey("server2");
+        assertThat(health.getDetails()).containsKey("servers");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> servers = (Map<String, Object>) health.getDetails().get("servers");
+        assertThat(servers).containsKey("server1");
+        assertThat(servers).containsKey("server2");
     }
 
     @Test

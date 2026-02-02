@@ -96,7 +96,7 @@ GET /actuator/netty/clients/order-service
   "host": "127.0.0.1",
   "port": 9000,
   "profile": "tcp-lengthfield-json",
-  "status": "CONNECTED",
+  "status": "RUNNING",
   "pool": {
     "size": 10,
     "active": 3,

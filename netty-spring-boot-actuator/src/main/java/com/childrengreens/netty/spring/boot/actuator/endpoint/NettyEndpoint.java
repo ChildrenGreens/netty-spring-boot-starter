@@ -16,20 +16,21 @@
 
 package com.childrengreens.netty.spring.boot.actuator.endpoint;
 
+import com.childrengreens.netty.spring.boot.context.client.ClientRuntime;
+import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrator;
 import com.childrengreens.netty.spring.boot.context.server.NettyServerOrchestrator;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
 import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
 import org.springframework.boot.actuate.endpoint.annotation.Selector;
+import org.springframework.lang.Nullable;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
- * Actuator endpoint for Netty server information.
+ * Actuator endpoint for Netty server and client information.
  *
- * <p>Exposes information about all configured Netty servers at
+ * <p>Exposes information about all configured Netty servers and clients at
  * {@code /actuator/netty}.
  *
  * @author ChildrenGreens
@@ -38,24 +39,75 @@ import java.util.Map;
 @Endpoint(id = "netty")
 public class NettyEndpoint {
 
-    private final NettyServerOrchestrator orchestrator;
+    @Nullable
+    private final NettyServerOrchestrator serverOrchestrator;
+
+    @Nullable
+    private final NettyClientOrchestrator clientOrchestrator;
 
     /**
      * Create a new NettyEndpoint.
-     * @param orchestrator the server orchestrator
+     * @param serverOrchestrator the server orchestrator (nullable)
+     * @param clientOrchestrator the client orchestrator (nullable)
      */
-    public NettyEndpoint(NettyServerOrchestrator orchestrator) {
-        this.orchestrator = orchestrator;
+    public NettyEndpoint(@Nullable NettyServerOrchestrator serverOrchestrator,
+                         @Nullable NettyClientOrchestrator clientOrchestrator) {
+        this.serverOrchestrator = serverOrchestrator;
+        this.clientOrchestrator = clientOrchestrator;
+    }
+
+    /**
+     * Get an overview of configured Netty servers and clients.
+     * @return summary information
+     */
+    @ReadOperation
+    public Map<String, Object> summary() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("servers", new ArrayList<>(getServerRuntimes().keySet()));
+        result.put("clients", new ArrayList<>(getClientRuntimes().keySet()));
+        return result;
+    }
+
+    /**
+     * Get information about all Netty servers or clients.
+     * @param type the group name ("servers" or "clients")
+     * @return details map, or null if type is not recognized
+     */
+    @ReadOperation
+    public Map<String, Object> group(@Selector String type) {
+        if ("servers".equalsIgnoreCase(type)) {
+            return buildServers();
+        }
+        if ("clients".equalsIgnoreCase(type)) {
+            return buildClients();
+        }
+        return null;
+    }
+
+    /**
+     * Get information about a specific Netty server or client.
+     * @param type the group name ("servers" or "clients")
+     * @param name the server/client name
+     * @return details map or null if not found
+     */
+    @ReadOperation
+    public Map<String, Object> group(@Selector String type, @Selector String name) {
+        if ("servers".equalsIgnoreCase(type)) {
+            return server(name);
+        }
+        if ("clients".equalsIgnoreCase(type)) {
+            return client(name);
+        }
+        return null;
     }
 
     /**
      * Get information about all Netty servers.
      * @return server information map
      */
-    @ReadOperation
-    public Map<String, Object> servers() {
+    private Map<String, Object> buildServers() {
         Map<String, Object> result = new LinkedHashMap<>();
-        Map<String, ServerRuntime> runtimes = orchestrator.getAllRuntimes();
+        Map<String, ServerRuntime> runtimes = getServerRuntimes();
 
         result.put("serverCount", runtimes.size());
 
@@ -73,13 +125,50 @@ public class NettyEndpoint {
      * @param serverName the server name
      * @return server information, or null if not found
      */
-    @ReadOperation
-    public Map<String, Object> server(@Selector String serverName) {
-        ServerRuntime runtime = orchestrator.getRuntime(serverName);
+    public Map<String, Object> server(String serverName) {
+        if (serverOrchestrator == null) {
+            return null;
+        }
+        ServerRuntime runtime = serverOrchestrator.getRuntime(serverName);
         if (runtime == null) {
             return null;
         }
         return buildServerInfo(runtime);
+    }
+
+    /**
+     * Get information about all Netty clients.
+     * @return client information map
+     */
+    private Map<String, Object> buildClients() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, ClientRuntime> runtimes = getClientRuntimes();
+
+        result.put("clientCount", runtimes.size());
+
+        Map<String, Object> clients = new LinkedHashMap<>();
+        for (Map.Entry<String, ClientRuntime> entry : runtimes.entrySet()) {
+            clients.put(entry.getKey(), buildClientInfo(entry.getValue()));
+        }
+        result.put("clients", clients);
+
+        return result;
+    }
+
+    /**
+     * Get information about a specific Netty client.
+     * @param clientName the client name
+     * @return client information, or null if not found
+     */
+    public Map<String, Object> client(String clientName) {
+        if (clientOrchestrator == null) {
+            return null;
+        }
+        ClientRuntime runtime = clientOrchestrator.getRuntime(clientName);
+        if (runtime == null) {
+            return null;
+        }
+        return buildClientInfo(runtime);
     }
 
     /**
@@ -88,7 +177,9 @@ public class NettyEndpoint {
     private Map<String, Object> buildServerInfo(ServerRuntime runtime) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", runtime.getSpec().getName());
-        info.put("state", runtime.getState().name());
+        String state = runtime.getState().name();
+        info.put("state", state);
+        info.put("status", state);
         info.put("transport", runtime.getSpec().getTransport().name());
         info.put("host", runtime.getSpec().getHost());
         info.put("port", runtime.getSpec().getPort());
@@ -108,7 +199,51 @@ public class NettyEndpoint {
         }
         info.put("features", features);
 
+        Map<String, Object> connections = new LinkedHashMap<>();
+        connections.put("current", runtime.getMetrics().getCurrentConnections());
+        connections.put("total", runtime.getMetrics().getTotalConnections());
+        info.put("connections", connections);
+
         return info;
+    }
+
+    /**
+     * Build client information map.
+     */
+    private Map<String, Object> buildClientInfo(ClientRuntime runtime) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        String state = runtime.getState().name();
+        info.put("name", runtime.getClientSpec().getName());
+        info.put("state", state);
+        info.put("status", state);
+        info.put("host", runtime.getClientSpec().getHost());
+        info.put("port", runtime.getClientSpec().getPort());
+        info.put("profile", runtime.getClientSpec().getProfile());
+
+        Map<String, Object> pool = new LinkedHashMap<>();
+        pool.put("size", runtime.getConnectionPool().getTotalConnections());
+        pool.put("active", runtime.getConnectionPool().getBorrowedConnections());
+        pool.put("idle", runtime.getConnectionPool().getIdleConnections());
+        pool.put("pending", runtime.getConnectionPool().getPendingAcquires());
+        info.put("pool", pool);
+
+        return info;
+    }
+
+    private Map<String, ServerRuntime> getServerRuntimes() {
+        if (serverOrchestrator == null) {
+            return Collections.emptyMap();
+        }
+        Map<String, ServerRuntime> runtimes = serverOrchestrator.getAllRuntimes();
+        return runtimes != null ? runtimes : Collections.emptyMap();
+    }
+
+    private Map<String, ClientRuntime> getClientRuntimes() {
+        if (clientOrchestrator == null) {
+            return Collections.emptyMap();
+        }
+        Map<String, ClientRuntime> runtimes = clientOrchestrator.getAllRuntimes();
+        return runtimes != null ? runtimes : Collections.emptyMap();
     }
 
 }

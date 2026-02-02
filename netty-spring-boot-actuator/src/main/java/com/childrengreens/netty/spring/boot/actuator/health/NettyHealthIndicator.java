@@ -16,19 +16,23 @@
 
 package com.childrengreens.netty.spring.boot.actuator.health;
 
+import com.childrengreens.netty.spring.boot.context.client.ClientRuntime;
+import com.childrengreens.netty.spring.boot.context.client.NettyClientOrchestrator;
 import com.childrengreens.netty.spring.boot.context.server.NettyServerOrchestrator;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import com.childrengreens.netty.spring.boot.context.server.ServerState;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.lang.Nullable;
 
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Health indicator for Netty servers.
+ * Health indicator for Netty servers and clients.
  *
- * <p>Reports the health status of all configured Netty servers including:
+ * <p>Reports the health status of all configured Netty servers and clients including:
  * <ul>
  * <li>Server state (running, stopped, failed)</li>
  * <li>Binding address and port</li>
@@ -40,51 +44,85 @@ import java.util.Map;
  */
 public class NettyHealthIndicator implements HealthIndicator {
 
-    private final NettyServerOrchestrator orchestrator;
+    @Nullable
+    private final NettyServerOrchestrator serverOrchestrator;
+
+    @Nullable
+    private final NettyClientOrchestrator clientOrchestrator;
 
     /**
      * Create a new NettyHealthIndicator.
-     * @param orchestrator the server orchestrator
+     * @param serverOrchestrator the server orchestrator (nullable)
+     * @param clientOrchestrator the client orchestrator (nullable)
      */
-    public NettyHealthIndicator(NettyServerOrchestrator orchestrator) {
-        this.orchestrator = orchestrator;
+    public NettyHealthIndicator(@Nullable NettyServerOrchestrator serverOrchestrator,
+                                @Nullable NettyClientOrchestrator clientOrchestrator) {
+        this.serverOrchestrator = serverOrchestrator;
+        this.clientOrchestrator = clientOrchestrator;
     }
 
     @Override
     public Health health() {
-        Map<String, ServerRuntime> runtimes = orchestrator.getAllRuntimes();
+        Map<String, ServerRuntime> serverRuntimes = getServerRuntimes();
+        Map<String, ClientRuntime> clientRuntimes = getClientRuntimes();
 
-        if (runtimes.isEmpty()) {
+        if (serverRuntimes.isEmpty() && clientRuntimes.isEmpty()) {
             return Health.unknown()
-                    .withDetail("message", "No Netty servers configured")
+                    .withDetail("message", "No Netty servers or clients configured")
                     .build();
         }
 
         boolean allHealthy = true;
-        Map<String, Object> details = new HashMap<>();
+        Map<String, Object> details = new LinkedHashMap<>();
 
-        for (Map.Entry<String, ServerRuntime> entry : runtimes.entrySet()) {
-            String name = entry.getKey();
-            ServerRuntime runtime = entry.getValue();
-
-            Map<String, Object> serverInfo = new HashMap<>();
-            serverInfo.put("state", runtime.getState().name());
-            serverInfo.put("transport", runtime.getSpec().getTransport().name());
-            serverInfo.put("host", runtime.getSpec().getHost());
-            serverInfo.put("port", runtime.getSpec().getPort());
-            serverInfo.put("profile", runtime.getSpec().getProfile());
-
-            if (runtime.getState() != ServerState.RUNNING) {
-                allHealthy = false;
+        if (!serverRuntimes.isEmpty()) {
+            Map<String, Object> servers = new LinkedHashMap<>();
+            for (Map.Entry<String, ServerRuntime> entry : serverRuntimes.entrySet()) {
+                String name = entry.getKey();
+                ServerRuntime runtime = entry.getValue();
+                boolean serverHealthy = runtime.getState() == ServerState.RUNNING;
+                servers.put(name, serverHealthy ? "UP" : "DOWN");
+                if (!serverHealthy) {
+                    allHealthy = false;
+                }
             }
+            details.put("servers", servers);
+        }
 
-            details.put(name, serverInfo);
+        if (!clientRuntimes.isEmpty()) {
+            Map<String, Object> clients = new LinkedHashMap<>();
+            for (Map.Entry<String, ClientRuntime> entry : clientRuntimes.entrySet()) {
+                String name = entry.getKey();
+                ClientRuntime runtime = entry.getValue();
+                boolean clientHealthy = runtime.getState() == ClientRuntime.ClientState.RUNNING;
+                clients.put(name, clientHealthy ? "UP" : "DOWN");
+                if (!clientHealthy) {
+                    allHealthy = false;
+                }
+            }
+            details.put("clients", clients);
         }
 
         Health.Builder builder = allHealthy ? Health.up() : Health.down();
         builder.withDetails(details);
 
         return builder.build();
+    }
+
+    private Map<String, ServerRuntime> getServerRuntimes() {
+        if (serverOrchestrator == null) {
+            return Collections.emptyMap();
+        }
+        Map<String, ServerRuntime> runtimes = serverOrchestrator.getAllRuntimes();
+        return runtimes != null ? runtimes : Collections.emptyMap();
+    }
+
+    private Map<String, ClientRuntime> getClientRuntimes() {
+        if (clientOrchestrator == null) {
+            return Collections.emptyMap();
+        }
+        Map<String, ClientRuntime> runtimes = clientOrchestrator.getAllRuntimes();
+        return runtimes != null ? runtimes : Collections.emptyMap();
     }
 
 }
