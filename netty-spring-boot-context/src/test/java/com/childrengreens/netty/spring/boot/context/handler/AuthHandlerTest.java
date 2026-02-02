@@ -18,16 +18,16 @@ package com.childrengreens.netty.spring.boot.context.handler;
 
 import com.childrengreens.netty.spring.boot.context.auth.*;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -252,5 +252,494 @@ class AuthHandlerTest {
         authMessage.put("type", "/auth");
         authMessage.put("payload", Map.of("username", username, "password", password));
         return authMessage;
+    }
+
+    // ========== TOKEN Mode Tests ==========
+
+    @Test
+    void tokenAuth_validToken_passesThrough() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.getToken().setHeaderName("Authorization");
+
+        when(authenticator.authenticateToken("Bearer valid-token"))
+                .thenReturn(AuthResult.success("user123"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "Bearer valid-token");
+        channel.writeInbound(request);
+
+        // Should pass through
+        assertThat(receivedMessages).hasSize(1);
+        assertThat(metrics.getSuccessCount()).isEqualTo(1);
+
+        // Principal should be set
+        AuthPrincipal principal = channel.attr(NettyContext.AUTH_PRINCIPAL_KEY).get();
+        assertThat(principal).isNotNull();
+        assertThat(principal.getUserId()).isEqualTo("user123");
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_missingToken_returns401() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.getToken().setHeaderName("Authorization");
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", null, null);
+        channel.writeInbound(request);
+
+        // Should not pass through
+        assertThat(receivedMessages).isEmpty();
+
+        // Should send 401 response
+        FullHttpResponse response = channel.readOutbound();
+        assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(HttpResponseStatus.UNAUTHORIZED);
+
+        String body = response.content().toString(StandardCharsets.UTF_8);
+        assertThat(body).contains("MISSING_TOKEN");
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_invalidToken_returns401() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.getToken().setHeaderName("Authorization");
+
+        when(authenticator.authenticateToken("Bearer invalid-token"))
+                .thenReturn(AuthResult.failure("INVALID_TOKEN", "Token expired"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "Bearer invalid-token");
+        channel.writeInbound(request);
+
+        // Should not pass through
+        assertThat(receivedMessages).isEmpty();
+        assertThat(metrics.getFailureCount()).isEqualTo(1);
+
+        // Should send 401 response
+        FullHttpResponse response = channel.readOutbound();
+        assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(HttpResponseStatus.UNAUTHORIZED);
+
+        String body = response.content().toString(StandardCharsets.UTF_8);
+        assertThat(body).contains("INVALID_TOKEN");
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_excludedPath_passesWithoutAuth() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.setExcludePaths(Arrays.asList("/health", "/actuator/**", "/public/*"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Test exact match
+        FullHttpRequest request1 = createHttpRequest("/health", null, null);
+        channel.writeInbound(request1);
+        assertThat(receivedMessages).hasSize(1);
+
+        // Test wildcard match
+        receivedMessages.clear();
+        FullHttpRequest request2 = createHttpRequest("/actuator/health", null, null);
+        channel.writeInbound(request2);
+        assertThat(receivedMessages).hasSize(1);
+
+        // Test single level wildcard
+        receivedMessages.clear();
+        FullHttpRequest request3 = createHttpRequest("/public/login", null, null);
+        channel.writeInbound(request3);
+        assertThat(receivedMessages).hasSize(1);
+
+        // Verify no authentication was attempted
+        verify(authenticator, never()).authenticateToken(anyString());
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_nonExcludedPath_requiresAuth() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.setExcludePaths(Arrays.asList("/health"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/users", null, null);
+        channel.writeInbound(request);
+
+        // Should be rejected due to missing token
+        assertThat(receivedMessages).isEmpty();
+
+        FullHttpResponse response = channel.readOutbound();
+        assertThat(response.status()).isEqualTo(HttpResponseStatus.UNAUTHORIZED);
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_pathWithQueryString_extractsCorrectly() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.setExcludePaths(Arrays.asList("/health"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Request with query string - should match /health
+        FullHttpRequest request = createHttpRequest("/health?detail=true", null, null);
+        channel.writeInbound(request);
+
+        // Should pass through without auth (path extracted correctly)
+        assertThat(receivedMessages).hasSize(1);
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_nonHttpMessage_passesThrough() {
+        spec.setMode(AuthMode.TOKEN);
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Send non-HTTP message
+        String textMessage = "plain text message";
+        channel.writeInbound(textMessage);
+
+        // Should pass through without authentication
+        assertThat(receivedMessages).hasSize(1);
+        assertThat(receivedMessages.get(0)).isEqualTo(textMessage);
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_customHeaderName_usesCorrectHeader() {
+        spec.setMode(AuthMode.TOKEN);
+        TokenSpec tokenSpec = new TokenSpec();
+        tokenSpec.setHeaderName("X-API-Key");
+        spec.setToken(tokenSpec);
+
+        when(authenticator.authenticateToken("my-api-key"))
+                .thenReturn(AuthResult.success("api-user"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "X-API-Key", "my-api-key");
+        channel.writeInbound(request);
+
+        assertThat(receivedMessages).hasSize(1);
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_nullTokenSpec_usesDefaultHeader() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(null);
+
+        when(authenticator.authenticateToken("Bearer token"))
+                .thenReturn(AuthResult.success("user123"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "Bearer token");
+        channel.writeInbound(request);
+
+        assertThat(receivedMessages).hasSize(1);
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_emptyToken_returns401() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.getToken().setHeaderName("Authorization");
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "");
+        channel.writeInbound(request);
+
+        // Should be rejected
+        assertThat(receivedMessages).isEmpty();
+
+        FullHttpResponse response = channel.readOutbound();
+        assertThat(response.status()).isEqualTo(HttpResponseStatus.UNAUTHORIZED);
+
+        String body = response.content().toString(StandardCharsets.UTF_8);
+        assertThat(body).contains("MISSING_TOKEN");
+
+        channel.close();
+    }
+
+    // ========== Auth Timeout Tests ==========
+
+    @Test
+    void credentialAuth_authTimeout_closesChannel() throws Exception {
+        spec.setAuthTimeout(100); // 100ms timeout
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Wait for timeout
+        Thread.sleep(200);
+
+        // Run pending scheduled tasks
+        channel.runScheduledPendingTasks();
+
+        // Verify timeout occurred
+        assertThat(metrics.getTimeoutCount()).isEqualTo(1);
+
+        // Response should be sent
+        Object response = channel.readOutbound();
+        assertThat(response).isNotNull();
+
+        channel.close();
+    }
+
+    @Test
+    void credentialAuth_authBeforeTimeout_noTimeoutError() throws Exception {
+        spec.setAuthTimeout(500); // 500ms timeout
+
+        when(authenticator.authenticateCredential("admin", "password"))
+                .thenReturn(AuthResult.success("user123"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Authenticate before timeout
+        channel.writeInbound(createAuthMessage("admin", "password"));
+
+        // Wait and run scheduled tasks
+        Thread.sleep(100);
+        channel.runScheduledPendingTasks();
+
+        // No timeout should have occurred
+        assertThat(metrics.getTimeoutCount()).isEqualTo(0);
+        assertThat(metrics.getSuccessCount()).isEqualTo(1);
+
+        channel.close();
+    }
+
+    @Test
+    void credentialAuth_zeroTimeout_noTimeoutScheduled() throws Exception {
+        spec.setAuthTimeout(0); // Disable timeout
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Wait a bit
+        Thread.sleep(100);
+        channel.runScheduledPendingTasks();
+
+        // No timeout should have occurred
+        assertThat(metrics.getTimeoutCount()).isEqualTo(0);
+
+        channel.close();
+    }
+
+    @Test
+    void credentialAuth_channelInactive_cancelsTimeout() throws Exception {
+        spec.setAuthTimeout(500);
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Close channel before timeout
+        channel.close();
+
+        // Wait for original timeout
+        Thread.sleep(100);
+
+        // No timeout error should occur since channel was closed
+        assertThat(metrics.getTimeoutCount()).isEqualTo(0);
+    }
+
+    // ========== isExcluded Tests ==========
+
+    @Test
+    void isExcluded_nullExcludePaths_returnsFalse() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.setExcludePaths(null);
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/any/path", null, null);
+        channel.writeInbound(request);
+
+        // Should require auth (not excluded)
+        assertThat(receivedMessages).isEmpty();
+
+        channel.close();
+    }
+
+    @Test
+    void isExcluded_emptyExcludePaths_returnsFalse() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.setExcludePaths(new ArrayList<>());
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/any/path", null, null);
+        channel.writeInbound(request);
+
+        // Should require auth (not excluded)
+        assertThat(receivedMessages).isEmpty();
+
+        channel.close();
+    }
+
+    @Test
+    void isExcluded_antPatternMatching_works() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+        spec.setExcludePaths(Arrays.asList(
+                "/api/v1/public/**",  // double wildcard
+                "/static/*.js",       // single level with extension
+                "/health"             // exact match
+        ));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        // Double wildcard - nested path
+        FullHttpRequest request1 = createHttpRequest("/api/v1/public/users/list", null, null);
+        channel.writeInbound(request1);
+        assertThat(receivedMessages).hasSize(1);
+
+        // Single level with extension
+        receivedMessages.clear();
+        FullHttpRequest request2 = createHttpRequest("/static/app.js", null, null);
+        channel.writeInbound(request2);
+        assertThat(receivedMessages).hasSize(1);
+
+        // Exact match
+        receivedMessages.clear();
+        FullHttpRequest request3 = createHttpRequest("/health", null, null);
+        channel.writeInbound(request3);
+        assertThat(receivedMessages).hasSize(1);
+
+        // Should NOT match
+        receivedMessages.clear();
+        FullHttpRequest request4 = createHttpRequest("/api/v2/public/users", null, null);
+        channel.writeInbound(request4);
+        assertThat(receivedMessages).isEmpty(); // Requires auth
+
+        channel.close();
+    }
+
+    // ========== escapeJson Tests ==========
+
+    @Test
+    void tokenAuth_specialCharsInError_escapedCorrectly() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+
+        when(authenticator.authenticateToken("bad-token"))
+                .thenReturn(AuthResult.failure("ERROR", "Invalid \"token\"\nwith\tnewlines\\and\\backslashes"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "bad-token");
+        channel.writeInbound(request);
+
+        FullHttpResponse response = channel.readOutbound();
+        String body = response.content().toString(StandardCharsets.UTF_8);
+
+        // Verify JSON is properly escaped
+        assertThat(body).contains("\\\"token\\\"");  // escaped quotes
+        assertThat(body).contains("\\n");            // escaped newline
+        assertThat(body).contains("\\t");            // escaped tab
+        assertThat(body).contains("\\\\");           // escaped backslash
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_nullErrorMessage_handledGracefully() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+
+        when(authenticator.authenticateToken("bad-token"))
+                .thenReturn(AuthResult.failure("ERROR", null));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "bad-token");
+        channel.writeInbound(request);
+
+        FullHttpResponse response = channel.readOutbound();
+        String body = response.content().toString(StandardCharsets.UTF_8);
+
+        // Should handle null gracefully (empty string)
+        assertThat(body).contains("\"message\":\"\"");
+
+        channel.close();
+    }
+
+    @Test
+    void tokenAuth_carriageReturn_escapedCorrectly() {
+        spec.setMode(AuthMode.TOKEN);
+        spec.setToken(new TokenSpec());
+
+        when(authenticator.authenticateToken("bad-token"))
+                .thenReturn(AuthResult.failure("ERROR", "line1\r\nline2"));
+
+        AuthHandler handler = new AuthHandler(spec, authenticator, connectionManager, metrics);
+        EmbeddedChannel channel = createChannel(handler);
+
+        FullHttpRequest request = createHttpRequest("/api/data", "Authorization", "bad-token");
+        channel.writeInbound(request);
+
+        FullHttpResponse response = channel.readOutbound();
+        String body = response.content().toString(StandardCharsets.UTF_8);
+
+        // Verify carriage return is escaped
+        assertThat(body).contains("\\r\\n");
+
+        channel.close();
+    }
+
+    // ========== Helper Methods ==========
+
+    private FullHttpRequest createHttpRequest(String uri, String headerName, String headerValue) {
+        FullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1,
+                HttpMethod.GET,
+                uri,
+                Unpooled.EMPTY_BUFFER);
+
+        if (headerName != null && headerValue != null) {
+            request.headers().set(headerName, headerValue);
+        }
+
+        return request;
     }
 }
