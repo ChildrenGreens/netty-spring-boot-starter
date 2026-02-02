@@ -62,7 +62,7 @@ class AuthFeatureProviderTest {
 
     @Test
     void getOrder_returnsCorrectOrder() {
-        assertThat(featureProvider.getOrder()).isEqualTo(180);
+        assertThat(featureProvider.getOrder()).isEqualTo(210);
     }
 
     @Test

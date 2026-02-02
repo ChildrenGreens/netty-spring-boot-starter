@@ -40,9 +40,10 @@ public class AuthFeatureProvider implements FeatureProvider {
     public static final String NAME = "auth";
 
     /**
-     * Order for this feature - after codec, before dispatcher.
+     * Order for this feature - after codec (profile), before dispatcher.
+     * Must be >= 200 because profile handlers are applied at order 200.
      */
-    public static final int ORDER = 180;
+    public static final int ORDER = 210;
 
     private final Authenticator authenticator;
     private final ConnectionManager connectionManager;
