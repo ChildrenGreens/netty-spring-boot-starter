@@ -28,7 +28,6 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.Nullable;
@@ -61,7 +60,7 @@ public class UdpTransportStarter implements TransportStarter {
                                 @Nullable BackpressureMetrics backpressureMetrics) throws Exception {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(workerGroup)
-                .channel(NioDatagramChannel.class)
+                .channel(transportFactory.getDatagramChannelClass())
                 .option(ChannelOption.SO_BROADCAST, true)
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override

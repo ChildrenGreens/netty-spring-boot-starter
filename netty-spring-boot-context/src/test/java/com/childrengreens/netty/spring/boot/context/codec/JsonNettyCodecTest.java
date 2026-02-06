@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +65,14 @@ class JsonNettyCodecTest {
         String json = new String(result, StandardCharsets.UTF_8);
         assertThat(json).contains("\"key\":\"value\"");
         assertThat(json).contains("\"number\":123");
+    }
+
+    @Test
+    void encode_withInstant_returnsJsonBytes() throws Exception {
+        TimeObject obj = new TimeObject(Instant.parse("2025-01-01T00:00:00Z"));
+        byte[] result = codec.encode(obj);
+        String json = new String(result, StandardCharsets.UTF_8);
+        assertThat(json).contains("\"processedAt\"");
     }
 
     @Test
@@ -137,6 +146,28 @@ class JsonNettyCodecTest {
 
         public void setValue(int value) {
             this.value = value;
+        }
+    }
+
+    /**
+     * Test object with Java time type.
+     */
+    static class TimeObject {
+        private Instant processedAt;
+
+        TimeObject() {
+        }
+
+        TimeObject(Instant processedAt) {
+            this.processedAt = processedAt;
+        }
+
+        public Instant getProcessedAt() {
+            return processedAt;
+        }
+
+        public void setProcessedAt(Instant processedAt) {
+            this.processedAt = processedAt;
         }
     }
 }

@@ -21,14 +21,17 @@ import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
 import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollDatagramChannel;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.epoll.EpollSocketChannel;
 import io.netty.channel.kqueue.KQueue;
+import io.netty.channel.kqueue.KQueueDatagramChannel;
 import io.netty.channel.kqueue.KQueueEventLoopGroup;
 import io.netty.channel.kqueue.KQueueServerSocketChannel;
 import io.netty.channel.kqueue.KQueueSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.junit.jupiter.api.Test;
@@ -209,6 +212,15 @@ class TransportFactoryTest {
         assertThat(factory.getClientChannelClass()).isEqualTo(KQueueSocketChannel.class);
     }
 
+    @Test
+    void getDatagramChannelClass_withKqueue_returnsKQueueDatagramChannel() {
+        assumeTrue(KQueue.isAvailable(), "KQueue not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.KQUEUE);
+
+        assertThat(factory.getDatagramChannelClass()).isEqualTo(KQueueDatagramChannel.class);
+    }
+
     // ==================== EPOLL-specific tests (Linux) ====================
 
     @Test
@@ -260,6 +272,15 @@ class TransportFactoryTest {
         assertThat(factory.getClientChannelClass()).isEqualTo(EpollSocketChannel.class);
     }
 
+    @Test
+    void getDatagramChannelClass_withEpoll_returnsEpollDatagramChannel() {
+        assumeTrue(Epoll.isAvailable(), "Epoll not available on this platform");
+
+        TransportFactory factory = new TransportFactory(TransportImpl.EPOLL);
+
+        assertThat(factory.getDatagramChannelClass()).isEqualTo(EpollDatagramChannel.class);
+    }
+
     // ==================== NIO-specific tests ====================
 
     @Test
@@ -292,6 +313,13 @@ class TransportFactoryTest {
         TransportFactory factory = new TransportFactory(TransportImpl.NIO);
 
         assertThat(factory.getClientChannelClass()).isEqualTo(NioSocketChannel.class);
+    }
+
+    @Test
+    void getDatagramChannelClass_withNio_returnsNioDatagramChannel() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+
+        assertThat(factory.getDatagramChannelClass()).isEqualTo(NioDatagramChannel.class);
     }
 
     // ==================== AUTO resolution tests ====================

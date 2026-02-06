@@ -21,15 +21,19 @@ import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
 import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollDatagramChannel;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.epoll.EpollSocketChannel;
 import io.netty.channel.kqueue.KQueue;
+import io.netty.channel.kqueue.KQueueDatagramChannel;
 import io.netty.channel.kqueue.KQueueEventLoopGroup;
 import io.netty.channel.kqueue.KQueueServerSocketChannel;
 import io.netty.channel.kqueue.KQueueSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.slf4j.Logger;
@@ -138,6 +142,18 @@ public class TransportFactory {
             case EPOLL -> EpollSocketChannel.class;
             case KQUEUE -> KQueueSocketChannel.class;
             default -> NioSocketChannel.class;
+        };
+    }
+
+    /**
+     * Get the datagram channel class for UDP.
+     * @return the datagram channel class
+     */
+    public Class<? extends DatagramChannel> getDatagramChannelClass() {
+        return switch (resolvedTransport) {
+            case EPOLL -> EpollDatagramChannel.class;
+            case KQUEUE -> KQueueDatagramChannel.class;
+            default -> NioDatagramChannel.class;
         };
     }
 
