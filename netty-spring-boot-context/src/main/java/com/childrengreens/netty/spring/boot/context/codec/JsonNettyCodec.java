@@ -55,6 +55,7 @@ public class JsonNettyCodec implements NettyCodec {
      */
     public JsonNettyCodec(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        registerJavaTimeModule(this.objectMapper);
     }
 
     /**
@@ -65,8 +66,12 @@ public class JsonNettyCodec implements NettyCodec {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        mapper.registerModule(new JavaTimeModule());
+        registerJavaTimeModule(mapper);
         return mapper;
+    }
+
+    private static void registerJavaTimeModule(ObjectMapper mapper) {
+        mapper.registerModule(new JavaTimeModule());
     }
 
     @Override

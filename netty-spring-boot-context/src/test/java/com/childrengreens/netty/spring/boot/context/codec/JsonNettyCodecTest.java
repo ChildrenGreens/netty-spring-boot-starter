@@ -113,6 +113,15 @@ class JsonNettyCodecTest {
     }
 
     @Test
+    void constructor_withCustomObjectMapper_registersJavaTimeModule() throws Exception {
+        ObjectMapper customMapper = new ObjectMapper();
+        JsonNettyCodec customCodec = new JsonNettyCodec(customMapper);
+        byte[] result = customCodec.encode(new TimeObject(Instant.parse("2025-01-01T00:00:00Z")));
+        String json = new String(result, StandardCharsets.UTF_8);
+        assertThat(json).contains("\"processedAt\"");
+    }
+
+    @Test
     void getObjectMapper_returnsConfiguredMapper() {
         assertThat(codec.getObjectMapper()).isNotNull();
     }
