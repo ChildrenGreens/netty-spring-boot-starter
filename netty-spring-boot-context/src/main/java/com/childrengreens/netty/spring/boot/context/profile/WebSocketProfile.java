@@ -21,6 +21,9 @@ import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.websocketx.WebSocketFrameAggregator;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolConfig;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 
 /**
  * Profile for WebSocket connections.
@@ -43,6 +46,7 @@ public class WebSocketProfile implements Profile {
     public static final String NAME = "websocket";
 
     private static final int MAX_CONTENT_LENGTH = 64 * 1024; // 64KB for handshake
+    private static final int MAX_FRAME_SIZE = 64 * 1024; // 64KB for frames
 
     @Override
     public String getName() {
@@ -56,6 +60,17 @@ public class WebSocketProfile implements Profile {
 
         // Aggregator for handshake request
         pipeline.addLast("httpAggregator", new HttpObjectAggregator(MAX_CONTENT_LENGTH));
+
+        // WebSocket upgrade + frame handling
+        WebSocketServerProtocolConfig config = WebSocketServerProtocolConfig.newBuilder()
+                .websocketPath("/")
+                .checkStartsWith(true)
+                .maxFramePayloadLength(MAX_FRAME_SIZE)
+                .build();
+        pipeline.addLast("wsProtocol", new WebSocketServerProtocolHandler(config));
+
+        // Aggregator for fragmented WebSocket frames
+        pipeline.addLast("wsAggregator", new WebSocketFrameAggregator(MAX_FRAME_SIZE));
     }
 
     @Override

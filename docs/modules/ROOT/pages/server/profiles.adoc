@@ -320,6 +320,10 @@ ChannelPipeline:
 └── ExceptionHandler         (close frame on error)
 ----
 
+NOTE: By default, `WebSocketServerProtocolHandler` handles control frames
+(Ping/Pong/Close) and does not forward them downstream, so
+`DispatcherHandler` only receives data frames (Text/Binary).
+
 == UDP JSON Profile
 
 **Profile name:** `udp-json`

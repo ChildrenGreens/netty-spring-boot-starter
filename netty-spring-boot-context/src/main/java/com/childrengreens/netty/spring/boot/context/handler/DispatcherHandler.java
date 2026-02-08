@@ -34,6 +34,11 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.util.AttributeKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,6 +75,31 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     private final CodecRegistry codecRegistry;
     private final ObjectMapper objectMapper;
     private final ServerMetrics serverMetrics;
+
+    private static final AttributeKey<Boolean> WS_HANDSHAKE_COMPLETED_KEY =
+            AttributeKey.valueOf("netty.ws.handshake.completed");
+
+    private enum WsFrameKind {
+        TEXT,
+        BINARY
+    }
+
+    /**
+     * Marker event for internal WebSocket lifecycle dispatch.
+     */
+    private static final class WsEvent {
+        private final WsFrameKind kind;
+        private final boolean skipResponse;
+
+        private WsEvent(WsFrameKind kind) {
+            this(kind, false);
+        }
+
+        private WsEvent(WsFrameKind kind, boolean skipResponse) {
+            this.kind = kind;
+            this.skipResponse = skipResponse;
+        }
+    }
 
     /**
      * Create a new DispatcherHandler.
@@ -127,6 +157,9 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
 
         if (msg instanceof FullHttpRequest) {
             inbound = convertHttpRequest((FullHttpRequest) msg);
+        } else if (msg instanceof WebSocketFrame) {
+            handleWebSocketFrame(ctx, (WebSocketFrame) msg, startTime);
+            return;
         } else if (msg instanceof ByteBuf) {
             inbound = convertByteBuf((ByteBuf) msg);
         } else if (msg instanceof String) {
@@ -147,6 +180,39 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
                     inbound.releaseRawPayloadBuffer();
                     recordRequestMetrics(startTime);
                 });
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        Boolean completed = ctx.channel().attr(WS_HANDSHAKE_COMPLETED_KEY).get();
+        if (Boolean.TRUE.equals(completed)) {
+            super.userEventTriggered(ctx, evt);
+            return;
+        }
+
+        // Handle WebSocket handshake completion and dispatch OPEN event once.
+        if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete complete) {
+            String path = new QueryStringDecoder(complete.requestUri()).path();
+            ctx.channel().attr(NettyContext.WS_PATH_KEY).set(path);
+            ctx.channel().attr(WS_HANDSHAKE_COMPLETED_KEY).set(Boolean.TRUE);
+            dispatchWebSocketEvent(ctx, "OPEN", path, new WsEvent(WsFrameKind.TEXT));
+        }
+        super.userEventTriggered(ctx, evt);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        // Dispatch CLOSE event for WebSocket connections that completed handshake
+        Boolean completed = ctx.channel().attr(WS_HANDSHAKE_COMPLETED_KEY).get();
+        if (Boolean.TRUE.equals(completed)) {
+            String path = ctx.channel().attr(NettyContext.WS_PATH_KEY).get();
+            if (path == null || path.isEmpty()) {
+                path = "/";
+            }
+            dispatchWebSocketEvent(ctx, "CLOSE", path,
+                    new WsEvent(WsFrameKind.TEXT, true));
+        }
+        super.channelInactive(ctx);
     }
 
     /**
@@ -217,6 +283,85 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     }
 
     /**
+     * Handle WebSocket frames and dispatch them into the same routing flow.
+     */
+    private void handleWebSocketFrame(ChannelHandlerContext ctx, WebSocketFrame frame, long startTime) {
+        String path = ctx.channel().attr(NettyContext.WS_PATH_KEY).get();
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+
+        InboundMessage inbound;
+        if (frame instanceof TextWebSocketFrame textFrame) {
+            String text = textFrame.text();
+            byte[] raw = text.getBytes(StandardCharsets.UTF_8);
+            inbound = buildWebSocketInbound("TEXT", path, text, raw, null);
+            dispatchInbound(ctx, frame, inbound, startTime);
+            return;
+        }
+        if (frame instanceof BinaryWebSocketFrame binFrame) {
+            ByteBuf retained = binFrame.content().retainedSlice();
+            inbound = buildWebSocketInbound("BINARY", path, null, null, retained);
+            dispatchInbound(ctx, frame, inbound, startTime);
+        }
+    }
+
+    /**
+     * Build an inbound message for WebSocket routing.
+     */
+    private InboundMessage buildWebSocketInbound(String eventType, String path,
+                                                 Object payload, byte[] rawPayload, ByteBuf rawPayloadBuffer) {
+        Map<String, Object> headers = new HashMap<>();
+        headers.put("wsEvent", eventType);
+        headers.put("wsPath", path);
+        String routeKey = "WS:" + eventType + ":" + path;
+        return InboundMessage.builder()
+                .transport(TransportType.HTTP)
+                .routeKey(routeKey)
+                .headers(headers)
+                .payload(payload)
+                .rawPayload(rawPayload)
+                .rawPayload(rawPayloadBuffer)
+                .build();
+    }
+
+    /**
+     * Dispatch a WebSocket lifecycle event (OPEN/CLOSE) into the dispatcher.
+     */
+    private void dispatchWebSocketEvent(ChannelHandlerContext ctx, String eventType, String path,
+                                        Object originalMsg) {
+        long startTime = System.nanoTime();
+        InboundMessage inbound = buildWebSocketInbound(eventType, path, null, null, null);
+        dispatchInbound(ctx, originalMsg, inbound, startTime);
+    }
+
+    /**
+     * Shared dispatch path with consistent error handling and metrics.
+     */
+    private void dispatchInbound(ChannelHandlerContext ctx, Object originalMsg, InboundMessage inbound,
+                                 long startTime) {
+        NettyContext context = new NettyContext(ctx.channel());
+        try {
+            dispatcher.dispatch(inbound, context)
+                    .thenAccept(outbound -> writeResponse(ctx, originalMsg, outbound))
+                    .exceptionally(ex -> {
+                        logger.error("Error processing request", ex);
+                        writeErrorResponse(ctx, originalMsg, ex);
+                        return null;
+                    })
+                    .whenComplete((outbound, ex) -> {
+                        inbound.releaseRawPayloadBuffer();
+                        recordRequestMetrics(startTime);
+                    });
+        } catch (Exception ex) {
+            inbound.releaseRawPayloadBuffer();
+            logger.error("Error processing request", ex);
+            writeErrorResponse(ctx, originalMsg, ex);
+            recordRequestMetrics(startTime);
+        }
+    }
+
+    /**
      * Convert String to InboundMessage (for line-based protocols).
      */
     private InboundMessage convertString(String msg) {
@@ -274,8 +419,15 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
             return;
         }
 
+        // Skip response for events that should not write (e.g., CLOSE on inactive channel)
+        if (originalMsg instanceof WsEvent && ((WsEvent) originalMsg).skipResponse) {
+            return;
+        }
+
         if (originalMsg instanceof FullHttpRequest) {
             writeHttpResponse(ctx, (FullHttpRequest) originalMsg, outbound);
+        } else if (originalMsg instanceof WebSocketFrame || originalMsg instanceof WsEvent) {
+            writeWebSocketResponse(ctx, originalMsg, outbound);
         } else {
             writeTcpResponse(ctx, outbound);
         }
@@ -336,6 +488,42 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
             ctx.writeAndFlush(buffer);
         } catch (Exception e) {
             logger.error("Failed to write TCP response", e);
+        }
+    }
+
+    /**
+     * Write response as a WebSocket frame (text/binary).
+     */
+    private void writeWebSocketResponse(ChannelHandlerContext ctx, Object originalMsg, OutboundMessage outbound) {
+        WsFrameKind kind = WsFrameKind.TEXT;
+        if (originalMsg instanceof BinaryWebSocketFrame) {
+            kind = WsFrameKind.BINARY;
+        } else if (originalMsg instanceof WsEvent) {
+            kind = ((WsEvent) originalMsg).kind;
+        }
+
+        // Override frame kind based on payload type to avoid corrupting binary data
+        if (outbound.getPayload() instanceof byte[]) {
+            kind = WsFrameKind.BINARY;
+        }
+
+        try {
+            if (kind == WsFrameKind.BINARY) {
+                byte[] content = outbound.getPayload() instanceof byte[]
+                        ? (byte[]) outbound.getPayload()
+                        : serializeToJson(outbound.getPayload());
+                ctx.writeAndFlush(new BinaryWebSocketFrame(ctx.alloc().buffer(content.length).writeBytes(content)));
+            } else {
+                String text;
+                if (outbound.getPayload() instanceof String) {
+                    text = (String) outbound.getPayload();
+                } else {
+                    text = new String(serializeToJson(outbound.getPayload()), StandardCharsets.UTF_8);
+                }
+                ctx.writeAndFlush(new TextWebSocketFrame(text));
+            }
+        } catch (Exception e) {
+            logger.error("Failed to write WebSocket response", e);
         }
     }
 

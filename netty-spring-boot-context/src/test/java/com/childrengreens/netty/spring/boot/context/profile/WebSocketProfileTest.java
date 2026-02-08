@@ -54,12 +54,12 @@ class WebSocketProfileTest {
     }
 
     @Test
-    void configure_addsHttpCodecAndAggregator() {
+    void configure_addsHttpCodecAggregatorWsProtocolAndWsAggregator() {
         EmbeddedChannel channel = new EmbeddedChannel();
 
         profile.configure(channel.pipeline(), serverSpec);
 
-        assertThat(channel.pipeline().names()).contains("httpCodec", "httpAggregator");
+        assertThat(channel.pipeline().names()).contains("httpCodec", "httpAggregator", "wsProtocol", "wsAggregator");
 
         channel.close();
     }

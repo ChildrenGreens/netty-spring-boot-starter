@@ -18,6 +18,7 @@ package com.childrengreens.netty.spring.boot.context.handler;
 
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
 import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.dispatch.Dispatcher;
 import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
@@ -26,6 +27,9 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -178,6 +182,59 @@ class DispatcherHandlerTest {
         EmbeddedChannel channel = new EmbeddedChannel(handler);
 
         channel.writeInbound("PING test");
+
+        channel.close();
+    }
+
+    @Test
+    void userEventTriggered_withHandshakeComplete_dispatchesOpenEvent() {
+        AtomicReference<InboundMessage> captured = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0, InboundMessage.class));
+                    return CompletableFuture.completedFuture(OutboundMessage.ok("OPENED"));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        channel.pipeline().fireUserEventTriggered(
+                new WebSocketServerProtocolHandler.HandshakeComplete(
+                        "/ws", EmptyHttpHeaders.INSTANCE, null));
+
+        InboundMessage inbound = captured.get();
+        assertThat(inbound).isNotNull();
+        assertThat(inbound.getRouteKey()).isEqualTo("WS:OPEN:/ws");
+
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isInstanceOf(TextWebSocketFrame.class);
+        TextWebSocketFrame frame = (TextWebSocketFrame) outbound;
+        assertThat(frame.text()).isEqualTo("OPENED");
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withTextWebSocketFrame_dispatchesAndResponds() {
+        AtomicReference<InboundMessage> captured = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0, InboundMessage.class));
+                    return CompletableFuture.completedFuture(OutboundMessage.ok("PONG"));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.WS_PATH_KEY).set("/chat");
+
+        channel.writeInbound(new TextWebSocketFrame("PING"));
+
+        InboundMessage inbound = captured.get();
+        assertThat(inbound).isNotNull();
+        assertThat(inbound.getRouteKey()).isEqualTo("WS:TEXT:/chat");
+
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isInstanceOf(TextWebSocketFrame.class);
+        TextWebSocketFrame frame = (TextWebSocketFrame) outbound;
+        assertThat(frame.text()).isEqualTo("PONG");
 
         channel.close();
     }
@@ -368,6 +425,139 @@ class DispatcherHandlerTest {
         // Test potentially malicious JSON with special characters
         ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"test\\\"injection\",\"data\":\"</script>\"}", StandardCharsets.UTF_8);
         channel.writeInbound(buf);
+
+        channel.close();
+    }
+
+    @Test
+    void channelInactive_withCompletedHandshake_dispatchesCloseEvent() {
+        AtomicReference<InboundMessage> captured = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0, InboundMessage.class));
+                    return CompletableFuture.completedFuture(OutboundMessage.ok("OK"));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Simulate WebSocket handshake completion
+        channel.pipeline().fireUserEventTriggered(
+                new WebSocketServerProtocolHandler.HandshakeComplete(
+                        "/ws/chat", EmptyHttpHeaders.INSTANCE, null));
+
+        // Verify OPEN event was dispatched
+        InboundMessage openInbound = captured.get();
+        assertThat(openInbound).isNotNull();
+        assertThat(openInbound.getRouteKey()).isEqualTo("WS:OPEN:/ws/chat");
+
+        // Clear the captured reference and read outbound
+        captured.set(null);
+        channel.readOutbound();
+
+        // Close the channel to trigger channelInactive
+        channel.close();
+
+        // Verify CLOSE event was dispatched
+        InboundMessage closeInbound = captured.get();
+        assertThat(closeInbound).isNotNull();
+        assertThat(closeInbound.getRouteKey()).isEqualTo("WS:CLOSE:/ws/chat");
+    }
+
+    @Test
+    void channelInactive_withoutHandshake_doesNotDispatchCloseEvent() {
+        AtomicReference<InboundMessage> captured = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0, InboundMessage.class));
+                    return CompletableFuture.completedFuture(OutboundMessage.ok("OK"));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Close the channel without completing WebSocket handshake
+        channel.close();
+
+        // Verify no CLOSE event was dispatched
+        assertThat(captured.get()).isNull();
+    }
+
+    @Test
+    void channelInactive_withCloseEvent_doesNotWriteResponse() {
+        AtomicReference<InboundMessage> captured = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0, InboundMessage.class));
+                    return CompletableFuture.completedFuture(OutboundMessage.ok("SHOULD_NOT_BE_WRITTEN"));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Simulate WebSocket handshake completion
+        channel.pipeline().fireUserEventTriggered(
+                new WebSocketServerProtocolHandler.HandshakeComplete(
+                        "/ws", EmptyHttpHeaders.INSTANCE, null));
+
+        // Clear OPEN event response
+        channel.readOutbound();
+        captured.set(null);
+
+        // Close the channel to trigger CLOSE event
+        channel.close();
+
+        // Verify CLOSE event was dispatched
+        InboundMessage closeInbound = captured.get();
+        assertThat(closeInbound).isNotNull();
+        assertThat(closeInbound.getRouteKey()).isEqualTo("WS:CLOSE:/ws");
+
+        // Verify no response was written for CLOSE event
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isNull();
+    }
+
+    @Test
+    void userEventTriggered_withHandshakeComplete_andBinaryResponse_writesBinaryFrame() {
+        byte[] binaryData = new byte[]{0x00, 0x01, 0x02, (byte) 0xFF};
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(OutboundMessage.ok(binaryData)));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        // Simulate WebSocket handshake completion (OPEN event)
+        channel.pipeline().fireUserEventTriggered(
+                new WebSocketServerProtocolHandler.HandshakeComplete(
+                        "/ws", EmptyHttpHeaders.INSTANCE, null));
+
+        // Verify response is BinaryWebSocketFrame, not TextWebSocketFrame
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isInstanceOf(BinaryWebSocketFrame.class);
+
+        BinaryWebSocketFrame frame = (BinaryWebSocketFrame) outbound;
+        byte[] content = new byte[frame.content().readableBytes()];
+        frame.content().readBytes(content);
+        assertThat(content).isEqualTo(binaryData);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withTextWebSocketFrame_andBinaryResponse_writesBinaryFrame() {
+        byte[] binaryData = new byte[]{0x10, 0x20, 0x30};
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(OutboundMessage.ok(binaryData)));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.WS_PATH_KEY).set("/chat");
+
+        // Send TextWebSocketFrame but expect BinaryWebSocketFrame response due to byte[] payload
+        channel.writeInbound(new TextWebSocketFrame("request"));
+
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isInstanceOf(BinaryWebSocketFrame.class);
+
+        BinaryWebSocketFrame frame = (BinaryWebSocketFrame) outbound;
+        byte[] content = new byte[frame.content().readableBytes()];
+        frame.content().readBytes(content);
+        assertThat(content).isEqualTo(binaryData);
 
         channel.close();
     }

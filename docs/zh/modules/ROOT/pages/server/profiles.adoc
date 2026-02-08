@@ -320,6 +320,10 @@ ChannelPipeline:
 └── ExceptionHandler         (错误时发送关闭帧)
 ----
 
+NOTE: 默认情况下，`WebSocketServerProtocolHandler` 会处理控制帧
+(Ping/Pong/Close) 并且不会向下游传播，因此 `DispatcherHandler`
+只会接收到数据帧（Text/Binary）。
+
 == UDP JSON Profile
 
 **Profile 名称：** `udp-json`
