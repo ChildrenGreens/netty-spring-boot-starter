@@ -11,6 +11,7 @@
 * xref:extension.adoc[扩展点]
 * xref:actuator.adoc[Actuator 集成]
 * 源码解析
+** xref:source/context-packages.adoc[Context 模块包结构]
 ** xref:source/server-pipeline.adoc[服务端 Pipeline]
 ** xref:source/client-pipeline.adoc[客户端 Pipeline]
 ** xref:source/client-orchestrator.adoc[客户端编排器]

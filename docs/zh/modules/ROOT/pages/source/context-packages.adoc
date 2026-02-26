@@ -1,0 +1,601 @@
+= Context 模块包结构
+:page-pagination:
+
+本文档介绍 `netty-spring-boot-context` 模块的包结构，这是核心模块，包含注解、处理器、路由、编解码器以及客户端/服务端组件。
+
+== 包结构概览
+
+[source,text]
+----
+netty-spring-boot-context/
+└── src/main/java/com/childrengreens/netty/spring/boot/context/
+    ├── annotation/      # 注解定义
+    ├── auth/            # 认证授权
+    ├── backpressure/    # 背压控制
+    ├── client/          # 客户端组件
+    ├── codec/           # 编解码系统
+    ├── context/         # 上下文工具
+    ├── dispatch/        # 请求分发
+    ├── event/           # 事件机制
+    ├── feature/         # 管道特性
+    ├── handler/         # Netty 处理器
+    ├── message/         # 消息抽象
+    ├── metrics/         # 指标定义
+    ├── pipeline/        # 管道组装
+    ├── profile/         # 协议配置
+    ├── properties/      # 配置属性
+    ├── routing/         # 请求路由
+    ├── server/          # 服务端组件
+    └── transport/       # 传输层
+----
+
+== 包详细说明
+
+=== annotation
+
+定义所有框架注解，用于声明式编程。
+
+[cols="2,3"]
+|===
+|注解 |说明
+
+|`@NettyController`
+|标记类为 HTTP/WebSocket 控制器
+
+|`@NettyMessageController`
+|标记类为 TCP/UDP 消息控制器
+
+|`@NettyHttpGet/Post/Put/Delete`
+|HTTP 方法映射注解
+
+|`@NettyHttpMapping`
+|通用 HTTP 映射注解
+
+|`@NettyMessageMapping`
+|TCP/UDP 消息类型映射
+
+|`@NettyWsOnOpen`
+|WebSocket 连接打开事件处理器
+
+|`@NettyWsOnText`
+|WebSocket 文本帧处理器
+
+|`@NettyWsOnBinary`
+|WebSocket 二进制帧处理器
+
+|`@NettyWsOnClose`
+|WebSocket 连接关闭事件处理器
+
+|`@Body` / `@Header` / `@Param` / `@PathVar` / `@Query`
+|参数绑定注解
+
+|`@NettyClient`
+|标记接口为 Netty 客户端
+
+|`@EnableNettyClients`
+|启用 Netty 客户端扫描
+
+|`@NettyRequest`
+|标记方法为客户端请求
+|===
+
+=== auth
+
+处理连接认证和会话管理。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`Authenticator`
+|认证器接口，用于自定义认证逻辑
+
+|`ConnectionManager`
+|管理已认证的连接
+
+|`ConnectionPolicy` / `ConnectionStrategy`
+|连接管理策略
+
+|`TokenSpec` / `TokenType`
+|Token 规范定义
+
+|`AuthResult` / `AuthPrincipal`
+|认证结果和主体
+
+|`AuthMetrics`
+|认证指标跟踪
+|===
+
+=== backpressure
+
+处理流量过载场景。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`BackpressureStrategy`
+|背压处理策略
+
+|`DropPolicy`
+|过载时的消息丢弃策略
+
+|`BackpressureSpec`
+|背压配置
+
+|`BackpressureMetrics`
+|背压指标跟踪
+|===
+
+=== client
+
+实现 Netty 客户端功能。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`NettyClientRegistrar`
+|扫描并注册 `@NettyClient` 接口
+
+|`NettyClientsRegistrarImportSelector`
+|解析 `@EnableNettyClients` 注解
+
+|`ClientProxyFactory` / `ClientProxyFactoryBean`
+|为客户端接口生成 JDK 动态代理
+
+|`NettyClientOrchestrator`
+|管理客户端生命周期（启动/停止）
+
+|`ConnectionPool`
+|连接池管理
+
+|`ReconnectManager`
+|指数退避自动重连
+
+|`HeartbeatManager`
+|心跳保活
+
+|`RequestInvoker`
+|请求调用和响应处理
+
+|`ResponseFuture`
+|带超时的异步响应处理
+
+|`ClientRuntime`
+|客户端运行时状态
+|===
+
+=== codec
+
+消息序列化/反序列化。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`NettyCodec`
+|编解码器接口
+
+|`JsonNettyCodec`
+|JSON 编解码器实现
+
+|`CodecRegistry`
+|编解码器注册表
+
+|`CodecException`
+|编解码相关异常
+|===
+
+=== context
+
+全局上下文工具。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`NettyContext`
+|全局上下文，包含 Channel 属性（协议类型、服务器名称、WebSocket 路径等）
+|===
+
+=== dispatch
+
+将请求分发到处理方法。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`Dispatcher`
+|核心消息分发器
+
+|`ArgumentResolver`
+|参数解析器接口
+
+|`ArgumentResolverComposite`
+|组合参数解析器
+
+|`PathVariableArgumentResolver`
+|解析 `@PathVar` 参数
+
+|`QueryArgumentResolver`
+|解析 `@Query` 参数
+|===
+
+=== event
+
+Spring 事件集成。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`NettyEvent`
+|基础事件类
+
+|`NettyServerStartedEvent`
+|服务器启动事件
+
+|`NettyServerStoppedEvent`
+|服务器停止事件
+
+|`NettyClientConnectedEvent`
+|客户端连接事件
+
+|`NettyClientDisconnectedEvent`
+|客户端断开连接事件
+|===
+
+=== feature
+
+可插拔的管道特性模块（按 order 排序）。
+
+[cols="2,1,3"]
+|===
+|类 |顺序值 |说明
+
+|`SslFeatureProvider`
+|10
+|SSL/TLS 加密
+
+|`ConnectionLimitFeatureProvider`
+|10
+|连接数限制
+
+|`LoggingFeatureProvider`
+|50
+|日志记录
+
+|`RateLimitFeatureProvider`
+|50
+|限流
+
+|`IdleFeatureProvider`
+|150
+|空闲检测
+
+|`AuthFeatureProvider`
+|200
+|认证
+
+|`BackpressureFeatureProvider`
+|250
+|背压处理
+
+|`MetricsFeatureProvider`
+|300
+|指标采集
+
+|`FeatureRegistry`
+|-
+|特性注册表
+|===
+
+=== handler
+
+核心 ChannelHandler 实现。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`DispatcherHandler`
+|消息转换和路由分发
+
+|`ExceptionHandler`
+|协议感知的异常处理（HTTP 500 / WebSocket CloseFrame / TCP 静默）
+
+|`JsonCodecHandler`
+|JSON 编解码处理器
+
+|`AuthHandler`
+|认证处理器
+
+|`BackpressureHandler`
+|背压处理器
+
+|`MetricsChannelHandler`
+|指标采集处理器
+|===
+
+=== message
+
+统一消息抽象。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`InboundMessage`
+|入站消息（从网络接收）
+
+|`OutboundMessage`
+|出站消息（发送的响应/请求）
+|===
+
+=== metrics
+
+指标接口定义。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`ServerMetrics`
+|服务端指标接口
+
+|`ClientMetrics`
+|客户端指标接口
+|===
+
+=== pipeline
+
+管道组装。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`PipelineAssembler`
+|组装 Netty Pipeline（Profile + Features）
+
+|`NettyPipelineConfigurer`
+|自定义管道配置扩展点
+|===
+
+=== profile
+
+预定义的协议栈组合。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`Profile`
+|协议配置接口
+
+|`ProfileRegistry`
+|协议配置注册表
+
+|`Http1JsonProfile`
+|HTTP/1.1 + JSON
+
+|`WebSocketProfile`
+|WebSocket 协议
+
+|`TcpLengthFieldJsonProfile`
+|TCP 4字节长度前缀 + JSON
+
+|`TcpLineProfile`
+|TCP 行分隔（CRLF 分隔符）
+
+|`TcpRawProfile`
+|原始 TCP
+
+|`UdpJsonProfile`
+|UDP + JSON
+|===
+
+=== properties
+
+Spring Boot 配置绑定类。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`NettyProperties`
+|根配置类
+
+|`ServerSpec`
+|服务端配置
+
+|`ClientSpec`
+|客户端配置
+
+|`SslSpec`
+|SSL 配置
+
+|`IdleSpec`
+|空闲配置
+
+|`RateLimitSpec`
+|限流配置
+
+|`ConnectionLimitSpec`
+|连接限制配置
+
+|`PoolSpec`
+|连接池配置
+
+|`ReconnectSpec`
+|重连配置
+
+|`HeartbeatSpec`
+|心跳配置
+
+|`TimeoutSpec`
+|超时配置
+
+|`TransportSpec` / `TransportType`
+|传输配置
+
+|`RoutingSpec` / `RoutingMode`
+|路由配置
+|===
+
+=== routing
+
+请求路由和匹配。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`Router`
+|路由器（精确匹配 + 路径变量匹配）
+
+|`RouteDefinition`
+|路由定义
+
+|`AnnotationRegistry`
+|注解扫描和注册
+
+|`NettyRouteResolver`
+|路由解析
+|===
+
+=== server
+
+服务端组件。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`NettyServerOrchestrator`
+|服务器编排（启动/停止）
+
+|`ServerRuntime`
+|服务器运行时状态
+
+|`ServerState`
+|服务器状态枚举
+|===
+
+=== transport
+
+传输层抽象。
+
+[cols="2,3"]
+|===
+|类 |说明
+
+|`TransportFactory`
+|传输层工厂
+
+|`TransportStarter`
+|传输启动器接口
+
+|`TcpTransportStarter`
+|TCP 传输实现
+
+|`UdpTransportStarter`
+|UDP 传输实现
+|===
+
+== 请求处理流程
+
+[source,text]
+----
+网络
+   │
+   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         ChannelPipeline                                  │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────────────────┐ │
+│  │SslFeature │→ │IdleFeature│→ │  Profile  │→ │   DispatcherHandler   │ │
+│  │ (order=10)│  │(order=150)│  │(帧编码+   │  │    (消息转换)          │ │
+│  │           │  │           │  │  编解码)  │  │                       │ │
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┬───────────┘ │
+└─────────────────────────────────────────────────────────────┼───────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │       Dispatcher       │
+                                                 │  ┌──────────────────┐  │
+                                                 │  │      Router      │  │
+                                                 │  │  - exactRoutes   │  │
+                                                 │  │  - patternRoutes │  │
+                                                 │  └────────┬─────────┘  │
+                                                 └───────────┼────────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │   ArgumentResolver     │
+                                                 │  - @PathVar            │
+                                                 │  - @Query              │
+                                                 │  - @Body               │
+                                                 │  - @Header             │
+                                                 └───────────┬────────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │      处理方法           │
+                                                 │  @NettyMessageMapping  │
+                                                 │  @NettyHttpGet         │
+                                                 │  @NettyWsOnText        │
+                                                 └───────────┬────────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │    OutboundMessage     │
+                                                 │        (响应)           │
+                                                 └────────────────────────┘
+----
+
+== 客户端调用流程
+
+[source,text]
+----
+应用代码
+       │
+       ▼
+┌──────────────────┐
+│  @NettyClient    │
+│   接口代理        │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐     ┌──────────────────┐
+│  RequestInvoker  │ ──► │  ConnectionPool  │
+│  - 序列化         │     │  - getChannel() │
+│  - 发送请求       │     │  - returnChannel│
+│  - 等待响应       │     └──────────────────┘
+└────────┬─────────┘              │
+         │                        ▼
+         │              ┌──────────────────┐
+         │              │ ReconnectManager │
+         │              │  - 指数退避       │
+         │              │                  │
+         │              └──────────────────┘
+         │                        │
+         │                        ▼
+         │              ┌──────────────────┐
+         │              │ HeartbeatManager │
+         │              │  - 心跳保活       │
+         │              │  - 健康检查       │
+         │              └──────────────────┘
+         │
+         ▼
+┌──────────────────┐
+│  ResponseFuture  │
+│  - correlationId │
+│  - timeout       │
+│  - callback      │
+└────────┬─────────┘
+         │
+         ▼
+     响应数据
+----

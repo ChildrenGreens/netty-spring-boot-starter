@@ -20,6 +20,8 @@ import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMet
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
+import io.netty.bootstrap.AbstractBootstrap;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -87,5 +89,24 @@ public interface TransportStarter {
                         EventLoopGroup workerGroup, ChannelInitializer<SocketChannel> initializer,
                         ServerMetrics serverMetrics, @Nullable BackpressureMetrics backpressureMetrics)
             throws Exception;
+
+    /**
+     * Bind the bootstrap to the specified host and port from ServerSpec.
+     * <p>If host is null, empty, or "0.0.0.0", binds to all interfaces.
+     * @param bootstrap the bootstrap to bind
+     * @param serverSpec the server specification containing host and port
+     * @return the bound channel
+     * @throws InterruptedException if binding is interrupted
+     * @since 0.0.2
+     */
+    default Channel bind(AbstractBootstrap<?, ?> bootstrap, ServerSpec serverSpec)
+            throws InterruptedException {
+        String host = serverSpec.getHost();
+        int port = serverSpec.getPort();
+        if (host != null && !host.isEmpty() && !"0.0.0.0".equals(host)) {
+            return bootstrap.bind(host, port).sync().channel();
+        }
+        return bootstrap.bind(port).sync().channel();
+    }
 
 }

@@ -146,14 +146,12 @@ class NettyClientRegistrarTest {
     @Test
     void postProcessBeanDefinitionRegistry_withValidPackage_registersClients() {
         // Use a package that contains test NettyClient interfaces
-        // Note: ClassPathScanningCandidateComponentProvider might not find interfaces by default
-        // This test verifies the scanning process runs without error
         registrar.setBasePackages("com.childrengreens.netty.spring.boot.context.client.testclient");
 
         registrar.postProcessBeanDefinitionRegistry(registry);
 
-        // Scanning interfaces might require additional configuration
-        // This test ensures the scanning process completes without error
+        // Verify that the ScanTestClient interface was scanned and registered
+        verify(registry).registerBeanDefinition(eq("scanTestClient"), any(BeanDefinition.class));
     }
 
     @Test

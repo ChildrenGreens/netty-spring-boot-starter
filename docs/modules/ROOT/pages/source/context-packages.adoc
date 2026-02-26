@@ -1,0 +1,601 @@
+= Context Module Package Structure
+:page-pagination:
+
+This document describes the package structure of the `netty-spring-boot-context` module, which is the core module containing annotations, handlers, routing, codec, and client/server components.
+
+== Package Overview
+
+[source,text]
+----
+netty-spring-boot-context/
+└── src/main/java/com/childrengreens/netty/spring/boot/context/
+    ├── annotation/      # Annotation definitions
+    ├── auth/            # Authentication and authorization
+    ├── backpressure/    # Backpressure control
+    ├── client/          # Client components
+    ├── codec/           # Codec system
+    ├── context/         # Context utilities
+    ├── dispatch/        # Request dispatching
+    ├── event/           # Event mechanism
+    ├── feature/         # Pipeline features
+    ├── handler/         # Netty handlers
+    ├── message/         # Message abstraction
+    ├── metrics/         # Metrics definitions
+    ├── pipeline/        # Pipeline assembly
+    ├── profile/         # Protocol profiles
+    ├── properties/      # Configuration properties
+    ├── routing/         # Request routing
+    ├── server/          # Server components
+    └── transport/       # Transport layer
+----
+
+== Package Details
+
+=== annotation
+
+Defines all framework annotations for declarative programming.
+
+[cols="2,3"]
+|===
+|Annotation |Description
+
+|`@NettyController`
+|Marks a class as HTTP/WebSocket controller
+
+|`@NettyMessageController`
+|Marks a class as TCP/UDP message controller
+
+|`@NettyHttpGet/Post/Put/Delete`
+|HTTP method mapping annotations
+
+|`@NettyHttpMapping`
+|Generic HTTP mapping annotation
+
+|`@NettyMessageMapping`
+|Message type mapping for TCP/UDP
+
+|`@NettyWsOnOpen`
+|WebSocket connection open event handler
+
+|`@NettyWsOnText`
+|WebSocket text frame handler
+
+|`@NettyWsOnBinary`
+|WebSocket binary frame handler
+
+|`@NettyWsOnClose`
+|WebSocket connection close event handler
+
+|`@Body` / `@Header` / `@Param` / `@PathVar` / `@Query`
+|Parameter binding annotations
+
+|`@NettyClient`
+|Marks an interface as Netty client
+
+|`@EnableNettyClients`
+|Enables Netty client scanning
+
+|`@NettyRequest`
+|Marks a method as client request
+|===
+
+=== auth
+
+Handles connection authentication and session management.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`Authenticator`
+|Authentication interface for custom auth logic
+
+|`ConnectionManager`
+|Manages authenticated connections
+
+|`ConnectionPolicy` / `ConnectionStrategy`
+|Connection management policies
+
+|`TokenSpec` / `TokenType`
+|Token specification definitions
+
+|`AuthResult` / `AuthPrincipal`
+|Authentication result and principal
+
+|`AuthMetrics`
+|Authentication metrics tracking
+|===
+
+=== backpressure
+
+Handles traffic overload scenarios.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`BackpressureStrategy`
+|Backpressure handling strategy
+
+|`DropPolicy`
+|Message drop policy when overloaded
+
+|`BackpressureSpec`
+|Backpressure configuration
+
+|`BackpressureMetrics`
+|Backpressure metrics tracking
+|===
+
+=== client
+
+Implements Netty client functionality.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`NettyClientRegistrar`
+|Scans and registers `@NettyClient` interfaces
+
+|`NettyClientsRegistrarImportSelector`
+|Parses `@EnableNettyClients` annotation
+
+|`ClientProxyFactory` / `ClientProxyFactoryBean`
+|JDK dynamic proxy generation for client interfaces
+
+|`NettyClientOrchestrator`
+|Manages client lifecycle (start/stop)
+
+|`ConnectionPool`
+|Connection pool management
+
+|`ReconnectManager`
+|Auto-reconnection with exponential backoff
+
+|`HeartbeatManager`
+|Keep-alive heartbeat
+
+|`RequestInvoker`
+|Request invocation and response handling
+
+|`ResponseFuture`
+|Async response handling with timeout
+
+|`ClientRuntime`
+|Client runtime state
+|===
+
+=== codec
+
+Message serialization/deserialization.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`NettyCodec`
+|Codec interface
+
+|`JsonNettyCodec`
+|JSON codec implementation
+
+|`CodecRegistry`
+|Codec registry for managing codecs
+
+|`CodecException`
+|Codec-related exceptions
+|===
+
+=== context
+
+Global context utilities.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`NettyContext`
+|Global context with channel attributes (protocol type, server name, WebSocket path, etc.)
+|===
+
+=== dispatch
+
+Request dispatching to handler methods.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`Dispatcher`
+|Core message dispatcher
+
+|`ArgumentResolver`
+|Parameter resolver interface
+
+|`ArgumentResolverComposite`
+|Composite argument resolver
+
+|`PathVariableArgumentResolver`
+|Resolves `@PathVar` parameters
+
+|`QueryArgumentResolver`
+|Resolves `@Query` parameters
+|===
+
+=== event
+
+Spring event integration.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`NettyEvent`
+|Base event class
+
+|`NettyServerStartedEvent`
+|Server started event
+
+|`NettyServerStoppedEvent`
+|Server stopped event
+
+|`NettyClientConnectedEvent`
+|Client connected event
+
+|`NettyClientDisconnectedEvent`
+|Client disconnected event
+|===
+
+=== feature
+
+Pluggable pipeline feature modules (sorted by order).
+
+[cols="2,1,3"]
+|===
+|Class |Order |Description
+
+|`SslFeatureProvider`
+|10
+|SSL/TLS encryption
+
+|`ConnectionLimitFeatureProvider`
+|10
+|Connection limit
+
+|`LoggingFeatureProvider`
+|50
+|Logging
+
+|`RateLimitFeatureProvider`
+|50
+|Rate limiting
+
+|`IdleFeatureProvider`
+|150
+|Idle detection
+
+|`AuthFeatureProvider`
+|200
+|Authentication
+
+|`BackpressureFeatureProvider`
+|250
+|Backpressure handling
+
+|`MetricsFeatureProvider`
+|300
+|Metrics collection
+
+|`FeatureRegistry`
+|-
+|Feature registry
+|===
+
+=== handler
+
+Core ChannelHandler implementations.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`DispatcherHandler`
+|Message conversion and routing dispatch
+
+|`ExceptionHandler`
+|Protocol-aware exception handling (HTTP 500 / WebSocket CloseFrame / TCP silent)
+
+|`JsonCodecHandler`
+|JSON codec handler
+
+|`AuthHandler`
+|Authentication handler
+
+|`BackpressureHandler`
+|Backpressure handler
+
+|`MetricsChannelHandler`
+|Metrics collection handler
+|===
+
+=== message
+
+Unified message abstraction.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`InboundMessage`
+|Inbound message (received from network)
+
+|`OutboundMessage`
+|Outbound message (response/request to send)
+|===
+
+=== metrics
+
+Metrics interface definitions.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`ServerMetrics`
+|Server-side metrics interface
+
+|`ClientMetrics`
+|Client-side metrics interface
+|===
+
+=== pipeline
+
+Pipeline assembly.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`PipelineAssembler`
+|Assembles Netty Pipeline (Profile + Features)
+
+|`NettyPipelineConfigurer`
+|Custom pipeline configuration extension point
+|===
+
+=== profile
+
+Predefined protocol stack combinations.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`Profile`
+|Protocol profile interface
+
+|`ProfileRegistry`
+|Profile registry
+
+|`Http1JsonProfile`
+|HTTP/1.1 + JSON
+
+|`WebSocketProfile`
+|WebSocket protocol
+
+|`TcpLengthFieldJsonProfile`
+|TCP with 4-byte length prefix + JSON
+
+|`TcpLineProfile`
+|TCP line-based (CRLF delimiter)
+
+|`TcpRawProfile`
+|Raw TCP
+
+|`UdpJsonProfile`
+|UDP + JSON
+|===
+
+=== properties
+
+Spring Boot configuration binding classes.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`NettyProperties`
+|Root configuration class
+
+|`ServerSpec`
+|Server configuration
+
+|`ClientSpec`
+|Client configuration
+
+|`SslSpec`
+|SSL configuration
+
+|`IdleSpec`
+|Idle configuration
+
+|`RateLimitSpec`
+|Rate limit configuration
+
+|`ConnectionLimitSpec`
+|Connection limit configuration
+
+|`PoolSpec`
+|Connection pool configuration
+
+|`ReconnectSpec`
+|Reconnection configuration
+
+|`HeartbeatSpec`
+|Heartbeat configuration
+
+|`TimeoutSpec`
+|Timeout configuration
+
+|`TransportSpec` / `TransportType`
+|Transport configuration
+
+|`RoutingSpec` / `RoutingMode`
+|Routing configuration
+|===
+
+=== routing
+
+Request routing and matching.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`Router`
+|Router (exact match + path variable match)
+
+|`RouteDefinition`
+|Route definition
+
+|`AnnotationRegistry`
+|Annotation scanning and registration
+
+|`NettyRouteResolver`
+|Route resolution
+|===
+
+=== server
+
+Server-side components.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`NettyServerOrchestrator`
+|Server orchestration (start/stop)
+
+|`ServerRuntime`
+|Server runtime state
+
+|`ServerState`
+|Server state enumeration
+|===
+
+=== transport
+
+Transport layer abstraction.
+
+[cols="2,3"]
+|===
+|Class |Description
+
+|`TransportFactory`
+|Transport layer factory
+
+|`TransportStarter`
+|Transport starter interface
+
+|`TcpTransportStarter`
+|TCP transport implementation
+
+|`UdpTransportStarter`
+|UDP transport implementation
+|===
+
+== Request Processing Flow
+
+[source,text]
+----
+Network
+   │
+   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         ChannelPipeline                                  │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────────────────┐ │
+│  │SslFeature │→ │IdleFeature│→ │  Profile  │→ │   DispatcherHandler   │ │
+│  │ (order=10)│  │(order=150)│  │(Framing+  │  │ (Message conversion)  │ │
+│  │           │  │           │  │  Codec)   │  │                       │ │
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┬───────────┘ │
+└─────────────────────────────────────────────────────────────┼───────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │       Dispatcher       │
+                                                 │  ┌──────────────────┐  │
+                                                 │  │      Router      │  │
+                                                 │  │  - exactRoutes   │  │
+                                                 │  │  - patternRoutes │  │
+                                                 │  └────────┬─────────┘  │
+                                                 └───────────┼────────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │   ArgumentResolver     │
+                                                 │  - @PathVar            │
+                                                 │  - @Query              │
+                                                 │  - @Body               │
+                                                 │  - @Header             │
+                                                 └───────────┬────────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │    Handler Method      │
+                                                 │  @NettyMessageMapping  │
+                                                 │  @NettyHttpGet         │
+                                                 │  @NettyWsOnText        │
+                                                 └───────────┬────────────┘
+                                                              │
+                                                              ▼
+                                                 ┌────────────────────────┐
+                                                 │    OutboundMessage     │
+                                                 │      (Response)        │
+                                                 └────────────────────────┘
+----
+
+== Client Invocation Flow
+
+[source,text]
+----
+Application Code
+       │
+       ▼
+┌──────────────────┐
+│  @NettyClient    │
+│  Interface Proxy │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐     ┌──────────────────┐
+│  RequestInvoker  │ ──► │  ConnectionPool  │
+│  - serialize     │     │  - getChannel()  │
+│  - send request  │     │  - returnChannel │
+│  - wait response │     └──────────────────┘
+└────────┬─────────┘              │
+         │                        ▼
+         │              ┌──────────────────┐
+         │              │ ReconnectManager │
+         │              │  - exponential   │
+         │              │    backoff       │
+         │              └──────────────────┘
+         │                        │
+         │                        ▼
+         │              ┌──────────────────┐
+         │              │ HeartbeatManager │
+         │              │  - keep-alive    │
+         │              │  - health check  │
+         │              └──────────────────┘
+         │
+         ▼
+┌──────────────────┐
+│  ResponseFuture  │
+│  - correlationId │
+│  - timeout       │
+│  - callback      │
+└────────┬─────────┘
+         │
+         ▼
+   Response Data
+----

@@ -152,7 +152,6 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Object msg) {
         long startTime = System.nanoTime();
-        NettyContext context = new NettyContext(ctx.channel());
         InboundMessage inbound;
 
         if (msg instanceof FullHttpRequest) {
@@ -169,17 +168,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
             return;
         }
 
-        dispatcher.dispatch(inbound, context)
-                .thenAccept(outbound -> writeResponse(ctx, msg, outbound))
-                .exceptionally(ex -> {
-                    logger.error("Error processing request", ex);
-                    writeErrorResponse(ctx, msg, ex);
-                    return null;
-                })
-                .whenComplete((outbound, ex) -> {
-                    inbound.releaseRawPayloadBuffer();
-                    recordRequestMetrics(startTime);
-                });
+        dispatchInbound(ctx, msg, inbound, startTime);
     }
 
     @Override

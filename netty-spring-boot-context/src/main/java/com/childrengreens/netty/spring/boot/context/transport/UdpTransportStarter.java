@@ -73,12 +73,7 @@ public class UdpTransportStarter implements TransportStarter {
         String host = serverSpec.getHost();
         int port = serverSpec.getPort();
 
-        Channel channel;
-        if (host != null && !host.isEmpty() && !"0.0.0.0".equals(host)) {
-            channel = bootstrap.bind(host, port).sync().channel();
-        } else {
-            channel = bootstrap.bind(port).sync().channel();
-        }
+        Channel channel = bind(bootstrap, serverSpec);
 
         logger.info("UDP Server [{}] started on {}:{}", serverSpec.getName(), host, port);
 

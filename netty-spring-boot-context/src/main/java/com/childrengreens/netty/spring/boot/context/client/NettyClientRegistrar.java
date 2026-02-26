@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanClassLoaderAware;
+import org.springframework.beans.factory.annotation.AnnotatedBeanDefinition;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
@@ -113,10 +114,22 @@ public class NettyClientRegistrar implements BeanDefinitionRegistryPostProcessor
 
     /**
      * Create a scanner for finding NettyClient interfaces.
+     * <p>Overrides {@code isCandidateComponent} to allow scanning interfaces,
+     * since the default implementation only accepts concrete classes.
      */
     private ClassPathScanningCandidateComponentProvider createScanner() {
         ClassPathScanningCandidateComponentProvider scanner =
-                new ClassPathScanningCandidateComponentProvider(false, environment);
+                new ClassPathScanningCandidateComponentProvider(false, environment) {
+                    @Override
+                    protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
+                        // Allow interfaces to be scanned (default implementation rejects them)
+                        // Exclude annotation definitions (@interface)
+                        if (beanDefinition.getMetadata().isIndependent()) {
+                            return !beanDefinition.getMetadata().isAnnotation();
+                        }
+                        return false;
+                    }
+                };
 
         scanner.setResourceLoader(resourceLoader);
         scanner.addIncludeFilter(new AnnotationTypeFilter(NettyClient.class));
