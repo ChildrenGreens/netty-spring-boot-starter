@@ -440,10 +440,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         // Try to extract from payload if it's a String (WebSocket text)
         Object payload = inbound.getPayload();
         if (payload instanceof String) {
-            String extracted = extractCorrelationIdFromJsonString((String) payload);
-            if (extracted != null) {
-                return extracted;
-            }
+            return extractCorrelationIdFromJsonString((String) payload);
         }
 
         return null;

@@ -18,6 +18,7 @@ package com.childrengreens.netty.spring.boot.context.transport;
 
 import com.childrengreens.netty.spring.boot.context.backpressure.BackpressureMetrics;
 import com.childrengreens.netty.spring.boot.context.metrics.ServerMetrics;
+import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
 import com.childrengreens.netty.spring.boot.context.server.ServerState;
@@ -43,13 +44,16 @@ public class UdpTransportStarter implements TransportStarter {
     private static final Logger logger = LoggerFactory.getLogger(UdpTransportStarter.class);
 
     private final TransportFactory transportFactory;
+    private final PipelineAssembler pipelineAssembler;
 
     /**
      * Create a new UdpTransportStarter.
      * @param transportFactory the transport factory
+     * @param pipelineAssembler the pipeline assembler
      */
-    public UdpTransportStarter(TransportFactory transportFactory) {
+    public UdpTransportStarter(TransportFactory transportFactory, PipelineAssembler pipelineAssembler) {
         this.transportFactory = transportFactory;
+        this.pipelineAssembler = pipelineAssembler;
     }
 
     @Override
@@ -65,8 +69,7 @@ public class UdpTransportStarter implements TransportStarter {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) throws Exception {
-                        // UDP-specific initialization
-                        // The actual pipeline will be configured separately
+                        pipelineAssembler.assemble(ch.pipeline(), serverSpec, serverMetrics, backpressureMetrics);
                     }
                 });
 

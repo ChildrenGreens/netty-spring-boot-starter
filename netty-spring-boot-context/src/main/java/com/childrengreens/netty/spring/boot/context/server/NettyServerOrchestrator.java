@@ -177,7 +177,7 @@ public class NettyServerOrchestrator implements InitializingBean, DisposableBean
             };
 
             // Start transport
-            TransportStarter starter = transportFactory.getTransportStarter(spec.getTransport());
+            TransportStarter starter = transportFactory.getTransportStarter(spec.getTransport(), pipelineAssembler);
             ServerRuntime runtime = starter.start(spec, bossGroup, workerGroup, initializer,
                     serverMetrics, backpressureMetrics);
 

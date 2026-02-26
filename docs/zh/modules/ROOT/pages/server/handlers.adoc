@@ -144,10 +144,6 @@ public class UserController {
 |`@NettyHttpDelete`
 |DELETE
 |`@NettyHttpDelete("/users/\{id\}")`
-
-|`@NettyHttpPatch`
-|PATCH
-|`@NettyHttpPatch("/users/\{id\}")`
 |===
 
 === 路径变量
@@ -237,9 +233,6 @@ curl -X POST -H "Content-Type: application/json" \
 
 |`@NettyWsOnClose`
 |WebSocket 连接关闭时调用
-
-|`@NettyWsOnError`
-|发生错误时调用
 |===
 
 === 完整 WebSocket 示例
@@ -293,11 +286,6 @@ public class ChatWebSocketHandler {
             NettyContext context) {
         connections.remove(context.getChannelId());
         chatService.leaveRoom(roomId, context);
-    }
-
-    @NettyWsOnError("/chat/{roomId}")
-    public void onError(Throwable error, NettyContext context) {
-        log.error("WebSocket error for channel {}", context.getChannelId(), error);
     }
 }
 ----

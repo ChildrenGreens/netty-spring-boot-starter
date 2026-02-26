@@ -113,13 +113,12 @@ Client Request
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐
-│ Handler Method  │
-│ @NettyMessage   │
-│ Mapping("ping") │
-└────────┬────────┘
-         │
-         ▼
+┌─────────────────────┐
+│   Handler Method    │
+│ @NettyMessageMapping│
+└──────────┬──────────┘
+          │
+          ▼
 ┌─────────────────┐
 │ OutboundMessage │
 │   (Response)    │

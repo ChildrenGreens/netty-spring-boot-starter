@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.properties.TransportImpl;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import io.netty.channel.EventLoopGroup;
@@ -37,7 +38,9 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for {@link TransportFactory}.
@@ -111,13 +114,23 @@ class TransportFactoryTest {
     }
 
     @Test
-    void getTransportStarter_forUdp_returnsUdpStarter() {
+    void getTransportStarter_forUdp_withPipelineAssembler_returnsUdpStarter() {
         TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+        PipelineAssembler mockAssembler = mock(PipelineAssembler.class);
 
-        TransportStarter starter = factory.getTransportStarter(TransportType.UDP);
+        TransportStarter starter = factory.getTransportStarter(TransportType.UDP, mockAssembler);
 
         assertThat(starter).isNotNull();
         assertThat(starter).isInstanceOf(UdpTransportStarter.class);
+    }
+
+    @Test
+    void getTransportStarter_forUdp_withoutPipelineAssembler_throwsException() {
+        TransportFactory factory = new TransportFactory(TransportImpl.NIO);
+
+        assertThatThrownBy(() -> factory.getTransportStarter(TransportType.UDP))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("PipelineAssembler is required for UDP transport");
     }
 
     @Test

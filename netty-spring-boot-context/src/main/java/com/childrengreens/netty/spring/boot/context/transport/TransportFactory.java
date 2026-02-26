@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.properties.TransportImpl;
 import com.childrengreens.netty.spring.boot.context.properties.TransportType;
 import io.netty.channel.EventLoopGroup;
@@ -161,11 +162,29 @@ public class TransportFactory {
      * Get a transport starter for the specified transport type.
      * @param transportType the transport type
      * @return the transport starter
+     * @deprecated Use {@link #getTransportStarter(TransportType, PipelineAssembler)} instead for UDP support
      */
+    @Deprecated
     public TransportStarter getTransportStarter(TransportType transportType) {
+        return getTransportStarter(transportType, null);
+    }
+
+    /**
+     * Get a transport starter for the specified transport type.
+     * @param transportType the transport type
+     * @param pipelineAssembler the pipeline assembler (required for UDP)
+     * @return the transport starter
+     * @since 0.0.2
+     */
+    public TransportStarter getTransportStarter(TransportType transportType, PipelineAssembler pipelineAssembler) {
         return switch (transportType) {
             case TCP, HTTP -> new TcpTransportStarter(this);
-            case UDP -> new UdpTransportStarter(this);
+            case UDP -> {
+                if (pipelineAssembler == null) {
+                    throw new IllegalArgumentException("PipelineAssembler is required for UDP transport");
+                }
+                yield new UdpTransportStarter(this, pipelineAssembler);
+            }
         };
     }
 

@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.transport;
 
+import com.childrengreens.netty.spring.boot.context.pipeline.PipelineAssembler;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import com.childrengreens.netty.spring.boot.context.properties.TransportImpl;
 import com.childrengreens.netty.spring.boot.context.server.ServerRuntime;
@@ -30,6 +31,9 @@ import org.junit.jupiter.api.Test;
 import java.net.DatagramSocket;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for {@link UdpTransportStarter}.
@@ -37,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class UdpTransportStarterTest {
 
     private TransportFactory transportFactory;
+    private PipelineAssembler pipelineAssembler;
     private UdpTransportStarter udpTransportStarter;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -45,7 +50,9 @@ class UdpTransportStarterTest {
     @BeforeEach
     void setUp() {
         transportFactory = new TransportFactory(TransportImpl.NIO);
-        udpTransportStarter = new UdpTransportStarter(transportFactory);
+        pipelineAssembler = mock(PipelineAssembler.class);
+        doNothing().when(pipelineAssembler).assemble(any(), any(), any(), any());
+        udpTransportStarter = new UdpTransportStarter(transportFactory, pipelineAssembler);
         bossGroup = transportFactory.createBossGroup(1);
         workerGroup = transportFactory.createWorkerGroup(2);
     }
@@ -152,8 +159,9 @@ class UdpTransportStarterTest {
     }
 
     @Test
-    void constructor_setsTransportFactory() {
-        UdpTransportStarter starter = new UdpTransportStarter(transportFactory);
+    void constructor_setsTransportFactoryAndPipelineAssembler() {
+        PipelineAssembler mockAssembler = mock(PipelineAssembler.class);
+        UdpTransportStarter starter = new UdpTransportStarter(transportFactory, mockAssembler);
         assertThat(starter).isNotNull();
     }
 
