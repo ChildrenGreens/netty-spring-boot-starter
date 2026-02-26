@@ -16,6 +16,7 @@
 
 package com.childrengreens.netty.spring.boot.context.client;
 
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import org.slf4j.Logger;
@@ -52,7 +53,7 @@ public class ClientResponseHandler extends SimpleChannelInboundHandler<Map<Strin
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Map<String, Object> response) throws Exception {
-        String correlationId = (String) response.get(RequestInvoker.CORRELATION_ID_HEADER);
+        String correlationId = (String) response.get(NettyContext.CORRELATION_ID_HEADER);
 
         if (correlationId != null) {
             boolean completed = requestInvoker.completeRequest(correlationId, response);

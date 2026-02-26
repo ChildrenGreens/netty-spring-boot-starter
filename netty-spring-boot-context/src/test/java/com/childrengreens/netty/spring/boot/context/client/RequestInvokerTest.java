@@ -99,7 +99,10 @@ class RequestInvokerTest {
 
         Map<String, Object> request = channel.readOutbound();
         assertThat(request.get("type")).isEqualTo("order");
-        assertThat(request.get("orderId")).isEqualTo("123");
+        // Payload should be wrapped in "data" field
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) request.get("data");
+        assertThat(data.get("orderId")).isEqualTo("123");
 
         channel.close();
     }
@@ -112,7 +115,10 @@ class RequestInvokerTest {
 
         Map<String, Object> request = channel.readOutbound();
         assertThat(request.get("type")).isEqualTo("notify");
-        assertThat(request.get("event")).isEqualTo("test");
+        // Payload should be wrapped in "data" field
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) request.get("data");
+        assertThat(data.get("event")).isEqualTo("test");
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNull();
 
         channel.close();
@@ -195,8 +201,8 @@ class RequestInvokerTest {
 
     @Test
     void invoke_reservedFieldsNotOverwrittenByPayload() {
-        // This test verifies the fix for reserved header fields being overwritten
-        // When payload contains 'type' or 'X-Correlation-Id', they should be ignored
+        // This test verifies that payload is wrapped in "data" field,
+        // so malicious fields in payload cannot override reserved fields
         EmbeddedChannel channel = new EmbeddedChannel();
 
         Map<String, Object> maliciousPayload = new HashMap<>();
@@ -208,13 +214,14 @@ class RequestInvokerTest {
 
         Map<String, Object> request = channel.readOutbound();
 
-        // Before fix: type would be "malicious-type" and correlationId would be "fake-correlation-id"
-        // After fix: reserved fields should retain their correct values
+        // Reserved fields should be set correctly at top level
         assertThat(request.get("type")).isEqualTo("actual-type");
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotEqualTo("fake-correlation-id");
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
-        // Payload data should still be included
-        assertThat(request.get("data")).isEqualTo("legitimate-data");
+        // Malicious payload is safely wrapped in "data" field
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) request.get("data");
+        assertThat(data.get("data")).isEqualTo("legitimate-data");
 
         channel.close();
     }
@@ -233,7 +240,10 @@ class RequestInvokerTest {
         Map<String, Object> request = channel.readOutbound();
 
         assertThat(request.get("type")).isEqualTo("correct-type");
-        assertThat(request.get("value")).isEqualTo("test-value");
+        // Payload is wrapped in "data" field
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) request.get("data");
+        assertThat(data.get("value")).isEqualTo("test-value");
         // One-way requests don't have correlation id
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNull();
 
@@ -252,9 +262,12 @@ class RequestInvokerTest {
 
         Map<String, Object> request = channel.readOutbound();
 
-        // Reserved fields should be filtered from payload even when messageType is null
+        // Type field should be null when messageType is null
         assertThat(request.get("type")).isNull();
-        assertThat(request.get("data")).isEqualTo("payload-data");
+        // Payload is wrapped in "data" field
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) request.get("data");
+        assertThat(data.get("data")).isEqualTo("payload-data");
 
         channel.close();
     }
@@ -272,13 +285,15 @@ class RequestInvokerTest {
 
         Map<String, Object> request = channel.readOutbound();
 
-        // All payload fields should be preserved
-        assertThat(request.get("orderId")).isEqualTo("12345");
-        assertThat(request.get("amount")).isEqualTo(100);
-        assertThat(request.get("currency")).isEqualTo("USD");
-        // Reserved fields should be set correctly
+        // Reserved fields should be set correctly at top level
         assertThat(request.get("type")).isEqualTo("createOrder");
         assertThat(request.get(RequestInvoker.CORRELATION_ID_HEADER)).isNotNull();
+        // All payload fields should be preserved in "data" field
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) request.get("data");
+        assertThat(data.get("orderId")).isEqualTo("12345");
+        assertThat(data.get("amount")).isEqualTo(100);
+        assertThat(data.get("currency")).isEqualTo("USD");
 
         channel.close();
     }

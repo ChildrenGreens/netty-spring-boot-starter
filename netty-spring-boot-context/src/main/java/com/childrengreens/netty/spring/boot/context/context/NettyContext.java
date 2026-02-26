@@ -105,9 +105,17 @@ public class NettyContext {
      */
     public static final AttributeKey<AuthMetrics> AUTH_METRICS_KEY = AttributeKey.valueOf("netty.auth.metrics");
 
+    /**
+     * Header name for correlation ID used in request-response matching.
+     * @since 0.0.2
+     */
+    public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+
     private final Channel channel;
 
     private final Map<String, Object> attributes = new ConcurrentHashMap<>();
+
+    private String correlationId;
 
     /**
      * Create a new NettyContext for the specified channel.
@@ -253,6 +261,24 @@ public class NettyContext {
     public String getUserId() {
         AuthPrincipal principal = getAuthPrincipal();
         return principal != null ? principal.getUserId() : null;
+    }
+
+    /**
+     * Return the correlation ID for request-response matching.
+     * @return the correlation ID, or {@code null} if not set
+     * @since 0.0.2
+     */
+    public String getCorrelationId() {
+        return this.correlationId;
+    }
+
+    /**
+     * Set the correlation ID for request-response matching.
+     * @param correlationId the correlation ID
+     * @since 0.0.2
+     */
+    public void setCorrelationId(String correlationId) {
+        this.correlationId = correlationId;
     }
 
 }

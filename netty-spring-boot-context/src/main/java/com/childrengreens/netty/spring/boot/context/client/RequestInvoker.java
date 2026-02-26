@@ -17,6 +17,7 @@
 package com.childrengreens.netty.spring.boot.context.client;
 
 import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.metrics.ClientMetrics;
 import com.childrengreens.netty.spring.boot.context.properties.ClientSpec;
 import io.netty.channel.Channel;
@@ -45,8 +46,10 @@ public class RequestInvoker {
 
     /**
      * Header name for correlation ID.
+     * @deprecated Use {@link NettyContext#CORRELATION_ID_HEADER} instead.
      */
-    public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+    @Deprecated
+    public static final String CORRELATION_ID_HEADER = NettyContext.CORRELATION_ID_HEADER;
 
     /**
      * Header name for message type.
@@ -107,6 +110,9 @@ public class RequestInvoker {
             // Build request message
             Map<String, Object> request = buildRequest(messageType, correlationId, payload);
 
+            // Log the request
+            logger.info("Sending request: {}", request);
+
             // Send request
             channel.writeAndFlush(request).addListener(future -> {
                 if (!future.isSuccess()) {
@@ -152,38 +158,30 @@ public class RequestInvoker {
     }
 
     /**
-     * Build a request message.
+     * Build a request message with unified format.
+     * <p>Message format: {@code {"type": "...", "X-Correlation-Id": "...", "data": {...}}}
+     *
      * @param messageType the message type
      * @param correlationId the correlation ID (may be null for one-way)
      * @param payload the payload
      * @return the request message
      */
-    @SuppressWarnings("unchecked")
     private Map<String, Object> buildRequest(String messageType, String correlationId, Object payload) {
         Map<String, Object> request = new HashMap<>();
 
-        // Filter reserved keys from payload to prevent override/injection
-        if (payload != null) {
-            if (payload instanceof Map) {
-                Map<String, Object> payloadMap = new HashMap<>((Map<String, Object>) payload);
-                payloadMap.remove(MESSAGE_TYPE_HEADER);
-                payloadMap.remove(CORRELATION_ID_HEADER);
-                request.putAll(payloadMap);
-            } else if (payload instanceof String) {
-                request.put("data", payload);
-            } else {
-                // Serialize complex objects
-                request.put("data", payload);
-            }
-        }
-
-        // Set reserved fields only when provided
+        // Set type field
         if (messageType != null) {
             request.put(MESSAGE_TYPE_HEADER, messageType);
         }
 
+        // Set correlation ID field
         if (correlationId != null) {
-            request.put(CORRELATION_ID_HEADER, correlationId);
+            request.put(NettyContext.CORRELATION_ID_HEADER, correlationId);
+        }
+
+        // Set data field (always wrap payload in data)
+        if (payload != null) {
+            request.put("data", payload);
         }
 
         return request;

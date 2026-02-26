@@ -66,9 +66,9 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     private static final String DEFAULT_ROUTE_KEY = "unknown";
 
     /**
-     * Supported route key field names in JSON messages.
+     * Route key field name in JSON messages.
      */
-    private static final String[] ROUTE_KEY_FIELDS = {"type", "cmd", "action", "command"};
+    private static final String ROUTE_KEY_FIELD = "type";
 
     private final Dispatcher dispatcher;
     private final ServerSpec serverSpec;
@@ -330,12 +330,15 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     private void dispatchInbound(ChannelHandlerContext ctx, Object originalMsg, InboundMessage inbound,
                                  long startTime) {
         NettyContext context = new NettyContext(ctx.channel());
+        // Extract correlation ID from inbound message headers
+        String correlationId = extractCorrelationId(inbound);
+        context.setCorrelationId(correlationId);
         try {
             dispatcher.dispatch(inbound, context)
-                    .thenAccept(outbound -> writeResponse(ctx, originalMsg, outbound))
+                    .thenAccept(outbound -> writeResponse(ctx, originalMsg, outbound, correlationId))
                     .exceptionally(ex -> {
                         logger.error("Error processing request", ex);
-                        writeErrorResponse(ctx, originalMsg, ex);
+                        writeErrorResponse(ctx, originalMsg, ex, correlationId);
                         return null;
                     })
                     .whenComplete((outbound, ex) -> {
@@ -345,7 +348,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         } catch (Exception ex) {
             inbound.releaseRawPayloadBuffer();
             logger.error("Error processing request", ex);
-            writeErrorResponse(ctx, originalMsg, ex);
+            writeErrorResponse(ctx, originalMsg, ex, correlationId);
             recordRequestMetrics(startTime);
         }
     }
@@ -364,9 +367,8 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     /**
      * Extract route key field from JSON ByteBuf using Jackson.
      *
-     * <p>This method safely parses JSON and looks for common route key fields
-     * such as "type", "cmd", "action", or "command". It uses {@link ByteBufInputStream}
-     * with {@link ByteBuf#duplicate()} for zero-copy JSON parsing.
+     * <p>This method safely parses JSON and looks for the "type" field.
+     * It uses {@link ByteBufInputStream} with {@link ByteBuf#duplicate()} for zero-copy JSON parsing.
      *
      * @param buf the JSON ByteBuf
      * @return the extracted route key, or {@link #DEFAULT_ROUTE_KEY} if not found
@@ -383,14 +385,11 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
                 return DEFAULT_ROUTE_KEY;
             }
 
-            // Try each supported field name in order
-            for (String fieldName : ROUTE_KEY_FIELDS) {
-                JsonNode fieldNode = rootNode.get(fieldName);
-                if (fieldNode != null && fieldNode.isTextual()) {
-                    String value = fieldNode.asText();
-                    if (value != null && !value.isEmpty()) {
-                        return value;
-                    }
+            JsonNode fieldNode = rootNode.get(ROUTE_KEY_FIELD);
+            if (fieldNode != null && fieldNode.isTextual()) {
+                String value = fieldNode.asText();
+                if (value != null && !value.isEmpty()) {
+                    return value;
                 }
             }
         } catch (Exception e) {
@@ -401,9 +400,114 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     }
 
     /**
+     * Extract correlation ID from inbound message.
+     * <p>Looks for the correlation ID in headers first, then in the raw JSON payload.
+     *
+     * @param inbound the inbound message
+     * @return the correlation ID, or {@code null} if not found
+     */
+    private String extractCorrelationId(InboundMessage inbound) {
+        // Check headers first (direct header)
+        Object headerValue = inbound.getHeaders().get(NettyContext.CORRELATION_ID_HEADER);
+        if (headerValue instanceof String && !((String) headerValue).isEmpty()) {
+            return (String) headerValue;
+        }
+
+        // Check HTTP headers (stored with "header." prefix and lowercase)
+        Object httpHeaderValue = inbound.getHeaders().get("header." + NettyContext.CORRELATION_ID_HEADER.toLowerCase());
+        if (httpHeaderValue instanceof String && !((String) httpHeaderValue).isEmpty()) {
+            return (String) httpHeaderValue;
+        }
+
+        // Try to extract from raw payload buffer (JSON)
+        ByteBuf buf = inbound.getRawPayloadBuffer();
+        if (buf != null && buf.isReadable()) {
+            String extracted = extractCorrelationIdFromJson(buf);
+            if (extracted != null) {
+                return extracted;
+            }
+        }
+
+        // Try to extract from raw payload bytes (JSON)
+        byte[] rawPayload = inbound.getRawPayload();
+        if (rawPayload != null && rawPayload.length > 0) {
+            String extracted = extractCorrelationIdFromJsonBytes(rawPayload);
+            if (extracted != null) {
+                return extracted;
+            }
+        }
+
+        // Try to extract from payload if it's a String (WebSocket text)
+        Object payload = inbound.getPayload();
+        if (payload instanceof String) {
+            String extracted = extractCorrelationIdFromJsonString((String) payload);
+            if (extracted != null) {
+                return extracted;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract correlation ID from JSON ByteBuf.
+     */
+    private String extractCorrelationIdFromJson(ByteBuf buf) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(new ByteBufInputStream(buf.duplicate()));
+            if (rootNode != null && rootNode.isObject()) {
+                JsonNode correlationNode = rootNode.get(NettyContext.CORRELATION_ID_HEADER);
+                if (correlationNode != null && correlationNode.isTextual()) {
+                    return correlationNode.asText();
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to extract correlation ID from JSON: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Extract correlation ID from JSON bytes.
+     */
+    private String extractCorrelationIdFromJsonBytes(byte[] bytes) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(bytes);
+            if (rootNode != null && rootNode.isObject()) {
+                JsonNode correlationNode = rootNode.get(NettyContext.CORRELATION_ID_HEADER);
+                if (correlationNode != null && correlationNode.isTextual()) {
+                    return correlationNode.asText();
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to extract correlation ID from JSON bytes: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Extract correlation ID from JSON string.
+     */
+    private String extractCorrelationIdFromJsonString(String json) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(json);
+            if (rootNode != null && rootNode.isObject()) {
+                JsonNode correlationNode = rootNode.get(NettyContext.CORRELATION_ID_HEADER);
+                if (correlationNode != null && correlationNode.isTextual()) {
+                    return correlationNode.asText();
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to extract correlation ID from JSON string: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
      * Write response back to the client.
      */
-    private void writeResponse(ChannelHandlerContext ctx, Object originalMsg, OutboundMessage outbound) {
+    private void writeResponse(ChannelHandlerContext ctx, Object originalMsg, OutboundMessage outbound,
+                               String correlationId) {
         if (outbound == null) {
             return;
         }
@@ -414,11 +518,11 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         }
 
         if (originalMsg instanceof FullHttpRequest) {
-            writeHttpResponse(ctx, (FullHttpRequest) originalMsg, outbound);
+            writeHttpResponse(ctx, (FullHttpRequest) originalMsg, outbound, correlationId);
         } else if (originalMsg instanceof WebSocketFrame || originalMsg instanceof WsEvent) {
-            writeWebSocketResponse(ctx, originalMsg, outbound);
+            writeWebSocketResponse(ctx, originalMsg, outbound, correlationId);
         } else {
-            writeTcpResponse(ctx, outbound);
+            writeTcpResponse(ctx, outbound, correlationId);
         }
     }
 
@@ -426,7 +530,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
      * Write HTTP response.
      */
     private void writeHttpResponse(ChannelHandlerContext ctx, FullHttpRequest request,
-                                    OutboundMessage outbound) {
+                                    OutboundMessage outbound, String correlationId) {
         byte[] content;
         try {
             if (outbound.getPayload() instanceof String) {
@@ -451,6 +555,11 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.length);
 
+        // Add correlation ID header if present
+        if (correlationId != null) {
+            response.headers().set(NettyContext.CORRELATION_ID_HEADER, correlationId);
+        }
+
         boolean keepAlive = HttpUtil.isKeepAlive(request);
         if (keepAlive) {
             response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
@@ -463,13 +572,20 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     /**
      * Write TCP response.
      */
-    private void writeTcpResponse(ChannelHandlerContext ctx, OutboundMessage outbound) {
+    private void writeTcpResponse(ChannelHandlerContext ctx, OutboundMessage outbound, String correlationId) {
         try {
+            Object payload = outbound.getPayload();
             byte[] content;
-            if (outbound.getPayload() instanceof byte[]) {
-                content = (byte[]) outbound.getPayload();
+
+            // Build response with unified format (skip for binary payloads)
+            if (!(payload instanceof byte[])) {
+                payload = buildResponse(payload, correlationId);
+            }
+
+            if (payload instanceof byte[]) {
+                content = (byte[]) payload;
             } else {
-                content = serializeToJson(outbound.getPayload());
+                content = serializeToJson(payload);
             }
 
             ByteBuf buffer = ctx.alloc().buffer(content.length);
@@ -483,7 +599,8 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     /**
      * Write response as a WebSocket frame (text/binary).
      */
-    private void writeWebSocketResponse(ChannelHandlerContext ctx, Object originalMsg, OutboundMessage outbound) {
+    private void writeWebSocketResponse(ChannelHandlerContext ctx, Object originalMsg, OutboundMessage outbound,
+                                        String correlationId) {
         WsFrameKind kind = WsFrameKind.TEXT;
         if (originalMsg instanceof BinaryWebSocketFrame) {
             kind = WsFrameKind.BINARY;
@@ -491,23 +608,30 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
             kind = ((WsEvent) originalMsg).kind;
         }
 
+        Object payload = outbound.getPayload();
+
         // Override frame kind based on payload type to avoid corrupting binary data
-        if (outbound.getPayload() instanceof byte[]) {
+        if (payload instanceof byte[]) {
             kind = WsFrameKind.BINARY;
+        }
+
+        // Build response with unified format (skip for binary payloads)
+        if (!(payload instanceof byte[])) {
+            payload = buildResponse(payload, correlationId);
         }
 
         try {
             if (kind == WsFrameKind.BINARY) {
-                byte[] content = outbound.getPayload() instanceof byte[]
-                        ? (byte[]) outbound.getPayload()
-                        : serializeToJson(outbound.getPayload());
+                byte[] content = payload instanceof byte[]
+                        ? (byte[]) payload
+                        : serializeToJson(payload);
                 ctx.writeAndFlush(new BinaryWebSocketFrame(ctx.alloc().buffer(content.length).writeBytes(content)));
             } else {
                 String text;
-                if (outbound.getPayload() instanceof String) {
-                    text = (String) outbound.getPayload();
+                if (payload instanceof String) {
+                    text = (String) payload;
                 } else {
-                    text = new String(serializeToJson(outbound.getPayload()), StandardCharsets.UTF_8);
+                    text = new String(serializeToJson(payload), StandardCharsets.UTF_8);
                 }
                 ctx.writeAndFlush(new TextWebSocketFrame(text));
             }
@@ -519,9 +643,30 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
     /**
      * Write error response.
      */
-    private void writeErrorResponse(ChannelHandlerContext ctx, Object originalMsg, Throwable ex) {
+    private void writeErrorResponse(ChannelHandlerContext ctx, Object originalMsg, Throwable ex,
+                                    String correlationId) {
         OutboundMessage error = OutboundMessage.error(500, ex.getMessage());
-        writeResponse(ctx, originalMsg, error);
+        writeResponse(ctx, originalMsg, error, correlationId);
+    }
+
+    /**
+     * Build response with unified format.
+     * <p>Response format: {@code {"X-Correlation-Id": "...", "data": {...}}}
+     *
+     * @param payload the original payload
+     * @param correlationId the correlation ID (may be null)
+     * @return the formatted response
+     */
+    private Object buildResponse(Object payload, String correlationId) {
+        // If no correlation ID, return payload as-is for backward compatibility
+        if (correlationId == null) {
+            return payload;
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put(NettyContext.CORRELATION_ID_HEADER, correlationId);
+        response.put("data", payload);
+        return response;
     }
 
     /**

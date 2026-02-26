@@ -17,12 +17,15 @@
 package com.childrengreens.netty.spring.boot.context.dispatch;
 
 import com.childrengreens.netty.spring.boot.context.codec.CodecRegistry;
+import com.childrengreens.netty.spring.boot.context.codec.JsonNettyCodec;
 import com.childrengreens.netty.spring.boot.context.codec.NettyCodec;
 import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.message.InboundMessage;
 import com.childrengreens.netty.spring.boot.context.message.OutboundMessage;
 import com.childrengreens.netty.spring.boot.context.routing.RouteDefinition;
 import com.childrengreens.netty.spring.boot.context.routing.Router;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.Channel;
@@ -58,6 +61,7 @@ public class Dispatcher {
     private final Router router;
     private final CodecRegistry codecRegistry;
     private final ArgumentResolverComposite argumentResolvers;
+    private final ObjectMapper objectMapper;
 
     /**
      * Create a new Dispatcher.
@@ -68,6 +72,18 @@ public class Dispatcher {
         this.router = router;
         this.codecRegistry = codecRegistry;
         this.argumentResolvers = new ArgumentResolverComposite();
+        this.objectMapper = resolveObjectMapper(codecRegistry);
+    }
+
+    /**
+     * Resolve ObjectMapper from CodecRegistry or create a new one.
+     */
+    private static ObjectMapper resolveObjectMapper(CodecRegistry codecRegistry) {
+        NettyCodec codec = codecRegistry.getCodec(JsonNettyCodec.NAME);
+        if (codec instanceof JsonNettyCodec) {
+            return ((JsonNettyCodec) codec).getObjectMapper();
+        }
+        return new ObjectMapper();
     }
 
     /**
@@ -146,31 +162,52 @@ public class Dispatcher {
             return payload;
         }
 
-        // Try codec conversion
+        // Try codec conversion - extract "data" field from unified message format
         if (message.getRawPayload() != null) {
-            NettyCodec codec = codecRegistry.getDefaultCodec();
-            if (codec != null) {
-                try {
-                    return codec.decode(message.getRawPayload(), type);
-                } catch (Exception e) {
-                    logger.debug("Failed to decode payload to {}: {}", type, e.getMessage());
-                }
+            Object decoded = decodeDataField(message.getRawPayload(), type);
+            if (decoded != null) {
+                return decoded;
             }
         } else if (message.getRawPayloadBuffer() != null) {
-            NettyCodec codec = codecRegistry.getDefaultCodec();
-            if (codec != null) {
-                try {
-                    ByteBuf buf = message.getRawPayloadBuffer();
-                    byte[] bytes = ByteBufUtil.getBytes(
-                            buf, buf.readerIndex(), buf.readableBytes(), false);
-                    return codec.decode(bytes, type);
-                } catch (Exception e) {
-                    logger.debug("Failed to decode payload to {}: {}", type, e.getMessage());
-                }
+            ByteBuf buf = message.getRawPayloadBuffer();
+            byte[] bytes = ByteBufUtil.getBytes(
+                    buf, buf.readerIndex(), buf.readableBytes(), false);
+            Object decoded = decodeDataField(bytes, type);
+            if (decoded != null) {
+                return decoded;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Decode the "data" field from a JSON message to the target type.
+     * <p>Message format: {@code {"type": "...", "X-Correlation-Id": "...", "data": {...}}}
+     *
+     * @param bytes the raw JSON bytes
+     * @param type the target type
+     * @return the decoded object, or null if decoding fails
+     */
+    private Object decodeDataField(byte[] bytes, Class<?> type) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(bytes);
+            if (rootNode == null || !rootNode.isObject()) {
+                return null;
+            }
+
+            JsonNode dataNode = rootNode.get("data");
+            if (dataNode != null) {
+                // Decode the "data" field to target type
+                return objectMapper.treeToValue(dataNode, type);
+            }
+
+            // Fallback: try decoding the entire message (for backward compatibility)
+            return objectMapper.treeToValue(rootNode, type);
+        } catch (Exception e) {
+            logger.debug("Failed to decode data field to {}: {}", type, e.getMessage());
+            return null;
+        }
     }
 
     /**

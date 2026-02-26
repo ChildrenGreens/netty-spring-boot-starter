@@ -310,51 +310,6 @@ class DispatcherHandlerTest {
     }
 
     @Test
-    void channelRead0_withByteBuf_extractsCmdField() {
-        when(dispatcher.dispatch(any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(
-                        OutboundMessage.ok(Map.of("status", "OK"))));
-
-        EmbeddedChannel channel = new EmbeddedChannel(handler);
-
-        // Test "cmd" field
-        ByteBuf buf = Unpooled.copiedBuffer("{\"cmd\":\"login\",\"user\":\"test\"}", StandardCharsets.UTF_8);
-        channel.writeInbound(buf);
-
-        channel.close();
-    }
-
-    @Test
-    void channelRead0_withByteBuf_extractsActionField() {
-        when(dispatcher.dispatch(any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(
-                        OutboundMessage.ok(Map.of("status", "OK"))));
-
-        EmbeddedChannel channel = new EmbeddedChannel(handler);
-
-        // Test "action" field
-        ByteBuf buf = Unpooled.copiedBuffer("{\"action\":\"create\",\"payload\":{}}", StandardCharsets.UTF_8);
-        channel.writeInbound(buf);
-
-        channel.close();
-    }
-
-    @Test
-    void channelRead0_withByteBuf_extractsCommandField() {
-        when(dispatcher.dispatch(any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(
-                        OutboundMessage.ok(Map.of("status", "OK"))));
-
-        EmbeddedChannel channel = new EmbeddedChannel(handler);
-
-        // Test "command" field
-        ByteBuf buf = Unpooled.copiedBuffer("{\"command\":\"start\",\"args\":[]}", StandardCharsets.UTF_8);
-        channel.writeInbound(buf);
-
-        channel.close();
-    }
-
-    @Test
     void channelRead0_withInvalidJson_usesDefaultRouteKey() {
         when(dispatcher.dispatch(any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(
@@ -558,6 +513,138 @@ class DispatcherHandlerTest {
         byte[] content = new byte[frame.content().readableBytes()];
         frame.content().readBytes(content);
         assertThat(content).isEqualTo(binaryData);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withByteBuf_extractsCorrelationIdAndIncludesInResponse() {
+        AtomicReference<NettyContext> capturedContext = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    capturedContext.set(invocation.getArgument(1, NettyContext.class));
+                    return CompletableFuture.completedFuture(
+                            OutboundMessage.ok(Map.of("status", "OK")));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        String correlationId = "test-correlation-123";
+        ByteBuf buf = Unpooled.copiedBuffer(
+                "{\"type\":\"ping\",\"X-Correlation-Id\":\"" + correlationId + "\"}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        // Verify correlation ID was extracted and set in context
+        assertThat(capturedContext.get()).isNotNull();
+        assertThat(capturedContext.get().getCorrelationId()).isEqualTo(correlationId);
+
+        // Verify response includes correlation ID
+        Object response = channel.readOutbound();
+        assertThat(response).isInstanceOf(ByteBuf.class);
+
+        ByteBuf responseBuf = (ByteBuf) response;
+        String responseJson = responseBuf.toString(StandardCharsets.UTF_8);
+        assertThat(responseJson).contains("X-Correlation-Id");
+        assertThat(responseJson).contains(correlationId);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withHttpRequest_extractsCorrelationIdAndIncludesInHeader() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        String correlationId = "http-correlation-456";
+        FullHttpRequest request = new DefaultFullHttpRequest(
+                HttpVersion.HTTP_1_1, HttpMethod.GET, "/api/test");
+        request.headers().set("X-Correlation-Id", correlationId);
+        channel.writeInbound(request);
+
+        Object response = channel.readOutbound();
+        assertThat(response).isInstanceOf(FullHttpResponse.class);
+
+        FullHttpResponse httpResponse = (FullHttpResponse) response;
+        assertThat(httpResponse.headers().get("X-Correlation-Id")).isEqualTo(correlationId);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withWebSocketFrame_extractsCorrelationIdAndIncludesInResponse() {
+        AtomicReference<NettyContext> capturedContext = new AtomicReference<>();
+        when(dispatcher.dispatch(any(), any()))
+                .thenAnswer(invocation -> {
+                    capturedContext.set(invocation.getArgument(1, NettyContext.class));
+                    return CompletableFuture.completedFuture(
+                            OutboundMessage.ok(Map.of("message", "pong")));
+                });
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.WS_PATH_KEY).set("/chat");
+
+        String correlationId = "ws-correlation-789";
+        channel.writeInbound(new TextWebSocketFrame(
+                "{\"type\":\"ping\",\"X-Correlation-Id\":\"" + correlationId + "\"}"));
+
+        // Verify correlation ID was extracted
+        assertThat(capturedContext.get()).isNotNull();
+        assertThat(capturedContext.get().getCorrelationId()).isEqualTo(correlationId);
+
+        // Verify response includes correlation ID
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isInstanceOf(TextWebSocketFrame.class);
+
+        TextWebSocketFrame frame = (TextWebSocketFrame) outbound;
+        assertThat(frame.text()).contains("X-Correlation-Id");
+        assertThat(frame.text()).contains(correlationId);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withoutCorrelationId_responseDoesNotIncludeCorrelationId() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("status", "OK"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        ByteBuf buf = Unpooled.copiedBuffer("{\"type\":\"ping\"}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        Object response = channel.readOutbound();
+        assertThat(response).isInstanceOf(ByteBuf.class);
+
+        ByteBuf responseBuf = (ByteBuf) response;
+        String responseJson = responseBuf.toString(StandardCharsets.UTF_8);
+        assertThat(responseJson).doesNotContain("X-Correlation-Id");
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withException_errorResponseIncludesCorrelationId() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Test error")));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        String correlationId = "error-correlation-001";
+        ByteBuf buf = Unpooled.copiedBuffer(
+                "{\"type\":\"test\",\"X-Correlation-Id\":\"" + correlationId + "\"}", StandardCharsets.UTF_8);
+        channel.writeInbound(buf);
+
+        Object response = channel.readOutbound();
+        assertThat(response).isInstanceOf(ByteBuf.class);
+
+        ByteBuf responseBuf = (ByteBuf) response;
+        String responseJson = responseBuf.toString(StandardCharsets.UTF_8);
+        assertThat(responseJson).contains("X-Correlation-Id");
+        assertThat(responseJson).contains(correlationId);
 
         channel.close();
     }

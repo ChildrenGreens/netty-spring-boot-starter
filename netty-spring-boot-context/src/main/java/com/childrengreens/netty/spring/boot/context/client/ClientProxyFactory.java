@@ -196,8 +196,9 @@ public class ClientProxyFactory {
                 // Handle return type
                 Class<?> returnType = method.getReturnType();
                 if (CompletableFuture.class.isAssignableFrom(returnType)) {
-                    // Async - return the future directly
-                    return future.whenComplete((result, ex) -> connectionPool.release(channel));
+                    // Async - convert result in the future chain
+                    return future.thenApply(result -> convertResult(result, method))
+                            .whenComplete((result, ex) -> connectionPool.release(channel));
                 } else if (returnType == void.class || returnType == Void.class) {
                     // Void return - wait but don't return value
                     future.whenComplete((result, ex) -> connectionPool.release(channel)).get();
@@ -266,6 +267,7 @@ public class ClientProxyFactory {
         /**
          * Convert the result to the expected return type.
          */
+        @SuppressWarnings("unchecked")
         private Object convertResult(Object result, Method method) {
             if (result == null) {
                 return null;
@@ -289,14 +291,18 @@ public class ClientProxyFactory {
                 return result;
             }
 
-            try {
-                TypeFactory typeFactory = objectMapper.getTypeFactory();
-                return objectMapper.convertValue(result, typeFactory.constructType(targetType));
-            } catch (IllegalArgumentException e) {
-                logger.debug("Failed to convert result {} to type {}", result.getClass().getName(), targetType, e);
+            // Extract data field if present (server wraps response in "data" field)
+            Object dataToConvert = result;
+            if (result instanceof Map) {
+                Map<String, Object> resultMap = (Map<String, Object>) result;
+                if (resultMap.containsKey("data")) {
+                    dataToConvert = resultMap.get("data");
+                }
             }
 
-            return result;
+            // Convert using ObjectMapper
+            TypeFactory typeFactory = objectMapper.getTypeFactory();
+            return objectMapper.convertValue(dataToConvert, typeFactory.constructType(targetType));
         }
     }
 
