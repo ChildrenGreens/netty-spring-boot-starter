@@ -33,6 +33,7 @@ import io.netty.buffer.ByteBufInputStream;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.http.*;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -42,6 +43,7 @@ import io.netty.util.AttributeKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -159,6 +161,8 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         } else if (msg instanceof WebSocketFrame) {
             handleWebSocketFrame(ctx, (WebSocketFrame) msg, startTime);
             return;
+        } else if (msg instanceof DatagramPacket) {
+            inbound = convertDatagramPacket(ctx, (DatagramPacket) msg);
         } else if (msg instanceof ByteBuf) {
             inbound = convertByteBuf((ByteBuf) msg);
         } else if (msg instanceof String) {
@@ -267,6 +271,29 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         return InboundMessage.builder()
                 .transport(TransportType.TCP)
                 .routeKey(routeKey)
+                .rawPayload(retained)
+                .build();
+    }
+
+    /**
+     * Convert DatagramPacket to InboundMessage (for UDP).
+     * <p>Stores the sender address in context for response routing.
+     */
+    private InboundMessage convertDatagramPacket(ChannelHandlerContext ctx, DatagramPacket packet) {
+        // Store sender address for response
+        ctx.channel().attr(NettyContext.UDP_SENDER_KEY).set(packet.sender());
+
+        ByteBuf content = packet.content();
+        ByteBuf retained = content.retainedSlice();
+        String routeKey = extractTypeFromJson(retained);
+
+        Map<String, Object> headers = new HashMap<>();
+        headers.put("udpSender", packet.sender().toString());
+
+        return InboundMessage.builder()
+                .transport(TransportType.UDP)
+                .routeKey(routeKey)
+                .headers(headers)
                 .rawPayload(retained)
                 .build();
     }
@@ -518,6 +545,8 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
             writeHttpResponse(ctx, (FullHttpRequest) originalMsg, outbound, correlationId);
         } else if (originalMsg instanceof WebSocketFrame || originalMsg instanceof WsEvent) {
             writeWebSocketResponse(ctx, originalMsg, outbound, correlationId);
+        } else if (originalMsg instanceof DatagramPacket) {
+            writeUdpResponse(ctx, outbound, correlationId);
         } else {
             writeTcpResponse(ctx, outbound, correlationId);
         }
@@ -590,6 +619,41 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
             ctx.writeAndFlush(buffer);
         } catch (Exception e) {
             logger.error("Failed to write TCP response", e);
+        }
+    }
+
+    /**
+     * Write UDP response.
+     * <p>Sends a DatagramPacket back to the original sender.
+     */
+    private void writeUdpResponse(ChannelHandlerContext ctx, OutboundMessage outbound, String correlationId) {
+        try {
+            InetSocketAddress sender = ctx.channel().attr(NettyContext.UDP_SENDER_KEY).get();
+            if (sender == null) {
+                logger.warn("Cannot send UDP response: sender address not available");
+                return;
+            }
+
+            Object payload = outbound.getPayload();
+            byte[] content;
+
+            // Build response with unified format (skip for binary payloads)
+            if (!(payload instanceof byte[])) {
+                payload = buildResponse(payload, correlationId);
+            }
+
+            if (payload instanceof byte[]) {
+                content = (byte[]) payload;
+            } else {
+                content = serializeToJson(payload);
+            }
+
+            ByteBuf buffer = ctx.alloc().buffer(content.length);
+            buffer.writeBytes(content);
+            DatagramPacket responsePacket = new DatagramPacket(buffer, sender);
+            ctx.writeAndFlush(responsePacket);
+        } catch (Exception e) {
+            logger.error("Failed to write UDP response", e);
         }
     }
 

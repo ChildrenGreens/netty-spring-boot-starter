@@ -33,6 +33,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -645,6 +646,41 @@ class DispatcherHandlerTest {
         String responseJson = responseBuf.toString(StandardCharsets.UTF_8);
         assertThat(responseJson).contains("X-Correlation-Id");
         assertThat(responseJson).contains(correlationId);
+
+        channel.close();
+    }
+
+    @Test
+    void channelRead0_withDatagramPacket_dispatchesAndResponds() {
+        when(dispatcher.dispatch(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        OutboundMessage.ok(Map.of("type", "pong"))));
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+
+        InetSocketAddress sender = new InetSocketAddress("127.0.0.1", 12345);
+        InetSocketAddress recipient = new InetSocketAddress("127.0.0.1", 9000);
+        ByteBuf content = Unpooled.copiedBuffer("{\"type\":\"ping\"}", StandardCharsets.UTF_8);
+        // DatagramPacket constructor: (content, recipient, sender)
+        io.netty.channel.socket.DatagramPacket packet =
+                new io.netty.channel.socket.DatagramPacket(content, recipient, sender);
+
+        channel.writeInbound(packet);
+
+        // Verify sender address is stored in channel attribute
+        InetSocketAddress storedSender = channel.attr(NettyContext.UDP_SENDER_KEY).get();
+        assertThat(storedSender).isEqualTo(sender);
+
+        // Verify response is sent as DatagramPacket
+        Object response = channel.readOutbound();
+        assertThat(response).isInstanceOf(io.netty.channel.socket.DatagramPacket.class);
+
+        io.netty.channel.socket.DatagramPacket responsePacket =
+                (io.netty.channel.socket.DatagramPacket) response;
+        assertThat(responsePacket.recipient()).isEqualTo(sender);
+
+        String responseJson = responsePacket.content().toString(StandardCharsets.UTF_8);
+        assertThat(responseJson).contains("pong");
 
         channel.close();
     }

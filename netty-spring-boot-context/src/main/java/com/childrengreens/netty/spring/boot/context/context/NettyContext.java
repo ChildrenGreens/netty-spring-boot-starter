@@ -77,6 +77,12 @@ public class NettyContext {
     public static final AttributeKey<String> WS_PATH_KEY = AttributeKey.valueOf("netty.ws.path");
 
     /**
+     * Attribute key for storing the UDP sender address in the channel.
+     * Used for sending responses back to the original sender.
+     */
+    public static final AttributeKey<InetSocketAddress> UDP_SENDER_KEY = AttributeKey.valueOf("netty.udp.sender");
+
+    /**
      * Attribute key for storing trace ID.
      */
     public static final AttributeKey<String> TRACE_ID_KEY = AttributeKey.valueOf("netty.trace.id");
