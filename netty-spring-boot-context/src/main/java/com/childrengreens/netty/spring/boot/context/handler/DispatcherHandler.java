@@ -271,7 +271,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
         return InboundMessage.builder()
                 .transport(TransportType.TCP)
                 .routeKey(routeKey)
-                .rawPayload(retained)
+                .rawPayloadBuffer(retained)
                 .build();
     }
 
@@ -294,7 +294,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
                 .transport(TransportType.UDP)
                 .routeKey(routeKey)
                 .headers(headers)
-                .rawPayload(retained)
+                .rawPayloadBuffer(retained)
                 .build();
     }
 
@@ -337,7 +337,7 @@ public class DispatcherHandler extends SimpleChannelInboundHandler<Object> {
                 .headers(headers)
                 .payload(payload)
                 .rawPayload(rawPayload)
-                .rawPayload(rawPayloadBuffer)
+                .rawPayloadBuffer(rawPayloadBuffer)
                 .build();
     }
 

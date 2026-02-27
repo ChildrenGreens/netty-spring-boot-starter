@@ -623,7 +623,7 @@ class DispatcherTest {
         InboundMessage message = InboundMessage.builder()
                 .transport(TransportType.TCP)
                 .routeKey("/test")
-                .rawPayload(buffer)  // Set rawPayloadBuffer (ByteBuf)
+                .rawPayloadBuffer(buffer)  // Set rawPayloadBuffer (ByteBuf)
                 .build();
 
         CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);
@@ -674,7 +674,7 @@ class DispatcherTest {
         InboundMessage message = InboundMessage.builder()
                 .transport(TransportType.TCP)
                 .routeKey("/test")
-                .rawPayload(buffer)
+                .rawPayloadBuffer(buffer)
                 .build();
 
         CompletableFuture<OutboundMessage> future = dispatcher.dispatch(message, context);

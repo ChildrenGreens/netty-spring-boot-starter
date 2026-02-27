@@ -280,7 +280,7 @@ public class InboundMessage {
          * @param rawPayloadBuffer the raw payload buffer
          * @return this builder
          */
-        public Builder rawPayload(ByteBuf rawPayloadBuffer) {
+        public Builder rawPayloadBuffer(ByteBuf rawPayloadBuffer) {
             this.rawPayloadBuffer = rawPayloadBuffer;
             return this;
         }
