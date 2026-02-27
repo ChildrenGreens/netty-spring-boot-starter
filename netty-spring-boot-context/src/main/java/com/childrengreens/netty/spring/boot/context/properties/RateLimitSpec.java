@@ -41,6 +41,14 @@ public class RateLimitSpec {
     private int burstSize = 0;
 
     /**
+     * Action to take when rate limit is exceeded.
+     * Applies to WebSocket, TCP, and UDP protocols.
+     * HTTP always returns 429 regardless of this setting.
+     * @since 0.0.2
+     */
+    private RateLimitAction action = RateLimitAction.DROP;
+
+    /**
      * Return whether rate limiting is enabled.
      * @return {@code true} if rate limiting is enabled
      */
@@ -86,6 +94,24 @@ public class RateLimitSpec {
      */
     public void setBurstSize(int burstSize) {
         this.burstSize = burstSize;
+    }
+
+    /**
+     * Return the action to take when rate limit is exceeded.
+     * @return the rate limit action
+     * @since 0.0.2
+     */
+    public RateLimitAction getAction() {
+        return this.action;
+    }
+
+    /**
+     * Set the action to take when rate limit is exceeded.
+     * @param action the rate limit action
+     * @since 0.0.2
+     */
+    public void setAction(RateLimitAction action) {
+        this.action = action;
     }
 
 }

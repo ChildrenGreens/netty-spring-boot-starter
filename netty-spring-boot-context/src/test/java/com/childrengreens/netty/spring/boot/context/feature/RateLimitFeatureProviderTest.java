@@ -16,7 +16,9 @@
 
 package com.childrengreens.netty.spring.boot.context.feature;
 
+import com.childrengreens.netty.spring.boot.context.context.NettyContext;
 import com.childrengreens.netty.spring.boot.context.properties.FeaturesSpec;
+import com.childrengreens.netty.spring.boot.context.properties.RateLimitAction;
 import com.childrengreens.netty.spring.boot.context.properties.RateLimitSpec;
 import com.childrengreens.netty.spring.boot.context.properties.ServerSpec;
 import io.netty.buffer.ByteBuf;
@@ -188,10 +190,13 @@ class RateLimitFeatureProviderTest {
     @Test
     void rateLimitHandler_releasesByteBufWhenRateLimitExceeded() {
         // This test verifies the fix for ByteBuf leak when rate limit is exceeded
+        // Use CLOSE action to match the original behavior (close connection)
         RateLimitFeatureProvider.RateLimitHandler handler =
-                new RateLimitFeatureProvider.RateLimitHandler(1, 1);
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1, RateLimitAction.CLOSE);
 
         EmbeddedChannel channel = new EmbeddedChannel(handler);
+        // Set protocol type for the handler to recognize
+        channel.attr(NettyContext.PROTOCOL_TYPE_KEY).set(NettyContext.PROTOCOL_TCP);
 
         // First message should pass (uses the initial token)
         ByteBuf buf1 = Unpooled.copiedBuffer("msg1".getBytes());
@@ -212,7 +217,7 @@ class RateLimitFeatureProviderTest {
         // After fix: refCnt should be 0
         assertThat(buf2.refCnt()).isEqualTo(0);
 
-        // Channel should be closed
+        // Channel should be closed (CLOSE action)
         assertThat(channel.isOpen()).isFalse();
     }
 
@@ -220,9 +225,10 @@ class RateLimitFeatureProviderTest {
     void rateLimitHandler_releasesMultipleByteBufsWhenRateLimitExceeded() {
         // Test that ByteBuf is released when rate limit is exceeded
         RateLimitFeatureProvider.RateLimitHandler handler =
-                new RateLimitFeatureProvider.RateLimitHandler(1, 1);
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1, RateLimitAction.CLOSE);
 
         EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.PROTOCOL_TYPE_KEY).set(NettyContext.PROTOCOL_TCP);
 
         // First message passes
         ByteBuf buf1 = Unpooled.copiedBuffer("msg1".getBytes());
@@ -244,16 +250,17 @@ class RateLimitFeatureProviderTest {
     @Test
     void rateLimitHandler_getters_returnCorrectValues() {
         RateLimitFeatureProvider.RateLimitHandler handler =
-                new RateLimitFeatureProvider.RateLimitHandler(100, 50);
+                new RateLimitFeatureProvider.RateLimitHandler(100, 50, RateLimitAction.DROP);
 
         assertThat(handler.getBurstSize()).isEqualTo(50);
         assertThat(handler.getTokens()).isEqualTo(50); // Initial tokens = burst size
+        assertThat(handler.getAction()).isEqualTo(RateLimitAction.DROP);
     }
 
     @Test
     void rateLimitHandler_withZeroBurstSize_usesRequestsPerSecond() {
         RateLimitFeatureProvider.RateLimitHandler handler =
-                new RateLimitFeatureProvider.RateLimitHandler(100, 0);
+                new RateLimitFeatureProvider.RateLimitHandler(100, 0, RateLimitAction.DROP);
 
         // When burstSize is 0, it should default to requestsPerSecond
         assertThat(handler.getBurstSize()).isEqualTo(100);
@@ -263,9 +270,10 @@ class RateLimitFeatureProviderTest {
     void rateLimitHandler_releasesNonByteBufObjectSafely() {
         // ReferenceCountUtil.release() should handle non-ByteBuf objects gracefully
         RateLimitFeatureProvider.RateLimitHandler handler =
-                new RateLimitFeatureProvider.RateLimitHandler(1, 1);
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1, RateLimitAction.CLOSE);
 
         EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.PROTOCOL_TYPE_KEY).set(NettyContext.PROTOCOL_TCP);
 
         // First message passes
         channel.writeInbound("msg1");
@@ -276,7 +284,79 @@ class RateLimitFeatureProviderTest {
         // ReferenceCountUtil.release() should not throw for non-reference-counted objects
         channel.writeInbound("msg2");
 
-        // Channel should be closed
+        // Channel should be closed (CLOSE action)
         assertThat(channel.isOpen()).isFalse();
+    }
+
+    @Test
+    void rateLimitHandler_withDropAction_keepsConnectionOpen() {
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1, RateLimitAction.DROP);
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.PROTOCOL_TYPE_KEY).set(NettyContext.PROTOCOL_TCP);
+
+        // First message passes
+        channel.writeInbound("msg1");
+        String received = channel.readInbound();
+        assertThat(received).isEqualTo("msg1");
+
+        // Second message should be dropped but connection stays open
+        channel.writeInbound("msg2");
+
+        // Connection should still be open with DROP action
+        assertThat(channel.isOpen()).isTrue();
+
+        channel.close();
+    }
+
+    @Test
+    void rateLimitHandler_withRejectAction_sendsErrorAndKeepsConnection() {
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1, RateLimitAction.REJECT);
+
+        EmbeddedChannel channel = new EmbeddedChannel(handler);
+        channel.attr(NettyContext.PROTOCOL_TYPE_KEY).set(NettyContext.PROTOCOL_TCP);
+
+        // First message passes
+        channel.writeInbound("msg1");
+        String received = channel.readInbound();
+        assertThat(received).isEqualTo("msg1");
+
+        // Second message should trigger error response
+        channel.writeInbound("msg2");
+
+        // Connection should still be open with REJECT action
+        assertThat(channel.isOpen()).isTrue();
+
+        // Should have written an error response
+        Object outbound = channel.readOutbound();
+        assertThat(outbound).isNotNull();
+
+        channel.close();
+    }
+
+    @Test
+    void rateLimitHandler_withNullAction_defaultsToDrop() {
+        RateLimitFeatureProvider.RateLimitHandler handler =
+                new RateLimitFeatureProvider.RateLimitHandler(1, 1, null);
+
+        assertThat(handler.getAction()).isEqualTo(RateLimitAction.DROP);
+    }
+
+    @Test
+    void rateLimitSpec_actionDefaultsToDrop() {
+        RateLimitSpec spec = new RateLimitSpec();
+        assertThat(spec.getAction()).isEqualTo(RateLimitAction.DROP);
+    }
+
+    @Test
+    void rateLimitSpec_actionCanBeSet() {
+        RateLimitSpec spec = new RateLimitSpec();
+        spec.setAction(RateLimitAction.CLOSE);
+        assertThat(spec.getAction()).isEqualTo(RateLimitAction.CLOSE);
+
+        spec.setAction(RateLimitAction.REJECT);
+        assertThat(spec.getAction()).isEqualTo(RateLimitAction.REJECT);
     }
 }

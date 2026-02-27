@@ -202,7 +202,9 @@ public class ReconnectManager {
             }
         } catch (InterruptedException e) {
             // Cancel pending connection on interrupt
-            future.cancel(true);
+            if (future != null) {
+                future.cancel(true);
+            }
             Thread.currentThread().interrupt();
             reconnecting.set(false);
         } catch (Exception e) {

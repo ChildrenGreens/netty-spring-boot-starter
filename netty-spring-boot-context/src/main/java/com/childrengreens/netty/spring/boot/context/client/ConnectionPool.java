@@ -228,7 +228,9 @@ public class ConnectionPool {
             }
         } catch (InterruptedException e) {
             // Cancel pending connection on interrupt
-            future.cancel(true);
+            if (future != null) {
+                future.cancel(true);
+            }
             totalConnections.decrementAndGet();
             Thread.currentThread().interrupt();
             throw new Exception("Connection interrupted", e);

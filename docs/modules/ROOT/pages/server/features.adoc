@@ -219,9 +219,61 @@ spring:
             enabled: true
             requestsPerSecond: 100     # <1>
             burstSize: 150             # <2>
+            action: DROP               # <3>
 ----
 <1> Sustained rate (tokens added per second)
 <2> Maximum burst (bucket capacity)
+<3> Action when limit exceeded: `DROP`, `CLOSE`, or `REJECT` (default: `DROP`)
+
+=== Rate Limit Actions
+
+The `action` property controls what happens when the rate limit is exceeded:
+
+[cols="1,3,3"]
+|===
+|Action |Description |Use Case
+
+|`DROP`
+|Drop the message silently, keep connection open
+|Long-lived connections (WebSocket, TCP) where occasional drops are acceptable
+
+|`CLOSE`
+|Close the connection after dropping the message
+|Strict enforcement, punish abusive clients
+
+|`REJECT`
+|Send an error response, keep connection open
+|Client-friendly, allows retry with backoff
+|===
+
+NOTE: For HTTP protocol, a `429 Too Many Requests` response is always sent regardless of the action setting.
+
+=== Protocol-Specific Behavior
+
+[cols="1,2,2,2"]
+|===
+|Protocol |DROP |CLOSE |REJECT
+
+|HTTP
+|429 response
+|429 response + close
+|429 response
+
+|WebSocket
+|Drop message, keep open
+|CloseFrame(1008) + close
+|Send error frame, keep open
+
+|TCP
+|Drop message, keep open
+|Close connection
+|Send error JSON, keep open
+
+|UDP
+|Drop message
+|Close channel
+|Send error JSON
+|===
 
 === Token Bucket Algorithm
 
@@ -237,14 +289,6 @@ Time 0.1s: Bucket = 110 (refilled 10 tokens)
 Time 0.5s: Bucket = 130 (refilled 40 tokens)
            Client sends 140 requests → 130 allowed, 10 rejected
 ----
-
-=== Behavior When Limited
-
-When rate limit is exceeded:
-
-1. Request is rejected
-2. Connection remains open
-3. Client receives an error response
 
 === Use Cases
 
